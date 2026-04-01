@@ -21,6 +21,7 @@ code/
 └── geohash-related/                     # This repo (independent of geospatial_v05)
     ├── README.md                        # This file
     └── geospatial_demo/
+        ├── run_demo.sh                  # One-command start/stop/clean/verify
         ├── data/
         │   └── 19_mapData.pipe.gz       # 344K Colorado POI records (compressed)
         └── demo/
@@ -31,6 +32,31 @@ code/
             ├── views/                   # HTML template (Leaflet map)
             └── slides/                  # Presentation images
 ```
+
+---
+
+## Quick Start (automated)
+
+After building YugabyteDB (Part 1) and installing GeoServer (Part 6), the
+`run_demo.sh` script handles everything else — cluster, database, data load,
+GeoServer configuration, and the Flask app:
+
+```bash
+cd geospatial_demo
+./run_demo.sh start    # start everything
+./run_demo.sh verify   # check all components
+./run_demo.sh stop     # stop all services
+./run_demo.sh clean    # stop + remove extracted data
+```
+
+The script auto-discovers `yugabyte-db` as a sibling directory. Override paths
+via environment variables if your layout differs:
+
+```bash
+YB_SRC_DIR=/path/to/yugabyte-db  GEOSERVER_HOME=/path/to/geoserver  ./run_demo.sh start
+```
+
+The step-by-step instructions below explain each phase in detail.
 
 ---
 

@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+geospatial_demo/data/19_mapData.pipe
