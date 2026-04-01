@@ -1,56 +1,50 @@
-# yb_geospatial — Reproduction Guide
+# yb_geospatial — Geospatial Demo
 
 End-to-end instructions for building, testing, and demoing the `yb_geospatial`
-extension on YugabyteDB. Everything here runs from the `geohash-related/` folder
-and the `yugabyte-db/` repo — no dependency on the upstream `geospatial_v05/`
-repo.
+extension on YugabyteDB. No dependency on the upstream `geospatial_v05/` repo.
 
 ## Directory Layout
 
 ```
-code/
-├── yugabyte-db/                         # YugabyteDB source (contains the extension)
-│   └── src/postgres/yb-extensions/
-│       └── yb_geospatial/
-│           ├── yb_geospatial--1.0.sql   # Extension SQL (160+ functions, types, etc.)
-│           ├── yb_geospatial.control
-│           ├── Makefile
-│           ├── sql/yb_geospatial.sql    # Regression test
-│           └── expected/yb_geospatial.out
-│
-└── geohash-related/                     # This repo (independent of geospatial_v05)
-    ├── README.md                        # This file
-    └── geospatial_demo/
-        ├── run_demo.sh                  # One-command start/stop/clean/verify
-        ├── data/
-        │   └── 19_mapData.pipe.gz       # 344K Colorado POI records (compressed)
-        └── demo/
-            ├── 60_index.py              # Flask demo app
-            ├── properties.ini           # DB connection config
-            ├── libraries/               # Python helper modules
-            ├── static/                  # CSS, JS, logo
-            ├── views/                   # HTML template (Leaflet map)
-            └── slides/                  # Presentation images
+geospatial_demo/                         # This folder
+├── README.md                            # This file
+├── run_demo.sh                          # One-command start/stop/clean/verify
+├── data/
+│   └── 19_mapData.pipe.gz              # 344K Colorado POI records (compressed)
+└── demo/
+    ├── 60_index.py                      # Flask demo app
+    ├── properties.ini                   # DB connection config
+    ├── libraries/                       # Python helper modules
+    ├── static/                          # CSS, JS, logo
+    ├── views/                           # HTML template (Leaflet map)
+    └── slides/                          # Presentation images
 ```
 
 ---
 
-## Quick Start (automated)
+## Quick Start
 
-After building YugabyteDB (Part 1) and installing GeoServer (Part 6), the
-`run_demo.sh` script handles everything else — cluster, database, data load,
-GeoServer configuration, and the Flask app:
+After building YugabyteDB (Part 1) and installing GeoServer (Part 6), just
+run the script and open the browser:
 
 ```bash
-cd geospatial_demo
-./run_demo.sh start    # start everything
-./run_demo.sh verify   # check all components
+./run_demo.sh start
+```
+
+This starts the YB cluster, loads 344K records, launches GeoServer and the
+Flask web app. Once it finishes, open http://localhost:5011 in your browser
+and click around the map.
+
+Other commands:
+
+```bash
+./run_demo.sh verify   # check all components are healthy
 ./run_demo.sh stop     # stop all services
 ./run_demo.sh clean    # stop + remove extracted data
 ```
 
-The script auto-discovers `yugabyte-db` as a sibling directory. Override paths
-via environment variables if your layout differs:
+The script auto-discovers `yugabyte-db` as a sibling directory of the repo.
+Override paths via environment variables if your layout differs:
 
 ```bash
 YB_SRC_DIR=/path/to/yugabyte-db  GEOSERVER_HOME=/path/to/geoserver  ./run_demo.sh start
@@ -140,11 +134,11 @@ $YSQLSH -d geospatial_test -c "CREATE EXTENSION yb_geospatial;"
 Extract and load the data:
 
 ```bash
-cd geospatial_demo/data
+cd data
 gunzip -k 19_mapData.pipe.gz     # keeps the .gz, creates 19_mapData.pipe
-cd ../..
+cd ..
 
-$YSQLSH -d geospatial_test -c "\copy my_mapdata(md_pk, md_lat, md_lng, geo_hash10, md_name, md_address, md_city, md_province, md_country, md_postcode, md_phone, md_category, md_subcategory, md_mysource, md_tags, md_type) FROM 'geospatial_demo/data/19_mapData.pipe' WITH (FORMAT csv, DELIMITER '|', HEADER true, ROWS_PER_TRANSACTION 100);"
+$YSQLSH -d geospatial_test -c "\copy my_mapdata(md_pk, md_lat, md_lng, geo_hash10, md_name, md_address, md_city, md_province, md_country, md_postcode, md_phone, md_category, md_subcategory, md_mysource, md_tags, md_type) FROM 'data/19_mapData.pipe' WITH (FORMAT csv, DELIMITER '|', HEADER true, ROWS_PER_TRANSACTION 100);"
 # Expected: COPY 344688 (~45 seconds)
 ```
 
@@ -378,7 +372,7 @@ pip3 install flask psycopg2-binary
 
 ### 8b. Update properties.ini
 
-Edit `geospatial_demo/demo/properties.ini`:
+Edit `demo/properties.ini`:
 
 ```ini
 [database]
@@ -392,7 +386,7 @@ DATABASE_PASSWORD=
 ### 8c. Start the Flask app
 
 ```bash
-cd geospatial_demo/demo
+cd demo
 python3 60_index.py &
 ```
 
@@ -435,17 +429,19 @@ produces an Index Scan on `ix_mapdata3`.
 
 ## Cleanup
 
-To stop everything:
+The easiest way:
 
 ```bash
-# Stop Flask
-kill %2    # or: pkill -f "python3 60_index.py"
+./run_demo.sh stop     # stop Flask, GeoServer, and YB cluster
+./run_demo.sh clean    # stop + remove extracted data file
+```
 
-# Stop GeoServer
-kill %1    # or: pkill -f "start.jar"
+Or manually:
 
-# Stop YugabyteDB
-cd yugabyte-db && bin/yb-ctl stop
+```bash
+pkill -f "python3 60_index.py"   # stop Flask
+pkill -f "start.jar"             # stop GeoServer
+cd yugabyte-db && bin/yb-ctl stop  # stop YugabyteDB
 ```
 
 To remove GeoServer:
@@ -457,5 +453,5 @@ rm -rf ~/geoserver
 To remove the extracted data file (keep the .gz):
 
 ```bash
-rm geospatial_demo/data/19_mapData.pipe
+rm data/19_mapData.pipe
 ```
