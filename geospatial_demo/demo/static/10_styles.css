@@ -1,0 +1,156 @@
+
+
+body {
+   font-family: Arial, Helvetica, sans-serif;
+   margin: 18px;
+}
+
+.header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+}
+
+.page-title {
+   font-size: 22px;
+   font-weight: 700;
+}
+
+.logo {
+   height: 48px;
+}
+
+hr {
+   margin-top: 12px;
+   margin-bottom: 16px;
+}
+
+.tabs {
+   display: flex;
+   gap: 8px;
+   margin-bottom: 14px;
+}
+
+.tab-button {
+   padding: 8px 12px;
+   border: 1px solid #aaa;
+   background: #f7f7f7;
+   cursor: pointer;
+   border-radius: 6px;
+}
+
+.tab-button.active {
+   background: #e9e9e9;
+   border-color: #666;
+}
+
+.tab-content {
+   display: none;
+   border: 1px solid #ddd;
+   border-radius: 8px;
+   padding: 14px;
+   background: #fff;
+}
+
+.tab-content.active {
+   display: block;
+}
+
+.tab-title {
+   font-size: 18px;
+   font-weight: 700;
+   margin-bottom: 12px;
+}
+
+.slide-panel {
+   display: grid;
+   grid-template-columns: 1fr;
+   gap: 10px;
+   max-width: 980px;
+}
+
+.slide-controls {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+}
+
+.slide-controls button {
+   width: 92px;
+   padding: 8px 12px;
+   border: 1px solid #666;
+   background: #f1f1f1;
+   border-radius: 6px;
+   cursor: pointer;
+}
+
+.slide-label {
+   font-weight: 700;
+}
+
+.slide-frame {
+   border: 1px solid #bbb;
+   border-radius: 8px;
+   padding: 10px;
+   min-height: 380px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   background: #fafafa;
+}
+
+.slide-frame img {
+   max-width: 100%;
+   max-height: 520px;
+}
+
+.mono {
+   font-family:
+      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+      "Liberation Mono", "Courier New", monospace;
+}
+
+/* ============================
+  Tab 1 overrides:
+  The base .slide-panel sets max-width: 980px and grid-template-columns: 1fr
+  The base .slide-frame img sets max-height: 520px
+
+  These overrides:
+    - switch Tab 1 panel to a 2-column layout
+    - make the right frame bigger
+    - remove the 520px max-height cap and let the image fill the frame
+  ============================ */
+
+#tab1 .slide-panel {
+   display: grid !important;
+   grid-template-columns: 220px 1fr !important;
+   gap: 24px !important;
+   max-width: none !important;
+   width: 100% !important;
+   align-items: start !important;
+}
+
+#tab1 .slide-controls {
+   display: flex !important;
+   flex-direction: column !important;
+   align-items: flex-start !important;
+   gap: 12px !important;
+}
+
+#tab1 .slide-frame {
+   min-height: 720px !important;
+   width: 100% !important;
+}
+
+#tab1 .slide-frame img,
+#tab1 #slideImage {
+   max-height: none !important;
+   height: 700px !important;
+   width: 100% !important;
+   object-fit: contain !important;
+   display: block !important;
+}
+
+
+
+

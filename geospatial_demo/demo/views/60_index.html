@@ -1,0 +1,302 @@
+<!doctype html>
+
+<html lang="en">
+   <!-- ------------------------------------------------------------ -->
+   <!-- ------------------------------------------------------------ -->
+
+   <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>yugabyteDB -- Geohash Performance</title>
+
+      <!-- Your existing stylesheet -->
+      <link rel="stylesheet" href="/static/10_styles.css" />
+
+      <!-- Leaflet CSS -->
+      <link
+         rel="stylesheet"
+         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      />
+
+      <style>
+         /* Map container — needs explicit height */
+         #map-wrapper {
+            position: relative;
+            width: 100%;
+            height: 620px;
+         }
+         #map {
+            width: 100%;
+            height: 100%;
+            border-radius: 8px;
+         }
+         #info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 12px 16px;
+            border-radius: 6px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            font-size: 13px;
+            max-width: 280px;
+         }
+         #info h3 {
+            margin: 0 0 6px 0;
+            font-size: 15px;
+         }
+
+         /* RPC Calls tab styling */
+         .rpc-section h3 {
+            margin-top: 24px;
+            margin-bottom: 8px;
+            color: #333;
+         }
+         .rpc-section p {
+            margin: 6px 0 12px 0;
+            color: #555;
+            line-height: 1.5;
+         }
+         .rpc-section pre {
+            background: #f4f4f4;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 12px 16px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+         }
+         .rpc-section .arrow {
+            text-align: center;
+            font-size: 28px;
+            color: #888;
+            margin: 16px 0;
+         }
+         .rpc-section .label {
+            display: inline-block;
+            background: #e8e8e8;
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 6px;
+         }
+      </style>
+   </head>
+
+   <!-- ------------------------------------------------------------ -->
+   <!-- ------------------------------------------------------------ -->
+
+   <body>
+      <link rel="shortcut icon" href="#" />
+
+      <div class="header">
+         <div class="header-left">
+            <div class="page-title">
+               <span style="color: #f05a28">
+                  yugabyteDB -- Geohash Performance
+               </span>
+            </div>
+         </div>
+         <div class="header-right">
+            <img
+               class="logo"
+               src="/static/yugabyte_logo.png"
+               alt="yugabyteDB logo"
+            />
+         </div>
+      </div>
+
+      <hr />
+
+      <div class="tabs">
+         <button class="tab-button active" data-tab="tab1">Overview</button>
+         <button class="tab-button" data-tab="tab2">Map View</button>
+         <button class="tab-button" data-tab="tab3">RPC Calls</button>
+      </div>
+
+      <!-- --------------------------------------------------------- -->
+
+      <!-- TAB 1 — Overview / Slides -->
+      <div class="tab-content active" id="tab1">
+         <div class="tab-title">Overview</div>
+
+         <div class="slide-panel">
+            <!-- LEFT -->
+            <div class="slide-controls">
+               <button id="btnSlideUp">Prev</button>
+               <button id="btnSlideDown">Next</button>
+               <div class="slide-label" id="slideLabel">Page 0 of 0.</div>
+            </div>
+
+            <!-- RIGHT -->
+            <div class="slide-frame">
+               <img id="slideImage" alt="Slide" />
+            </div>
+         </div>
+      </div>
+
+      <!-- --------------------------------------------------------- -->
+
+      <!-- TAB 2 — Map View -->
+      <div class="tab-content" id="tab2">
+         <div class="tab-title">Map View</div>
+
+         <div
+            id="map-controls"
+            style="
+               display: flex;
+               align-items: center;
+               gap: 18px;
+               margin-bottom: 10px;
+               font-size: 14px;
+            "
+         >
+            <label
+               ><input
+                  type="radio"
+                  name="queryMode"
+                  value="circle"
+                  checked
+               />
+               1 Mile Radius Circle</label
+            >
+            <label
+               ><input type="radio" name="queryMode" value="box" /> 1
+               Square Mile Box</label
+            >
+            <label
+               ><input type="radio" name="queryMode" value="polygon" /> 6
+               Sided Polygon</label
+            >
+            <button
+               id="btnClearPins"
+               style="
+                  display: none;
+                  padding: 6px 12px;
+                  border: 1px solid #666;
+                  background: #f1f1f1;
+                  border-radius: 6px;
+                  cursor: pointer;
+               "
+            >
+               Clear Pins
+            </button>
+         </div>
+
+         <div id="map-wrapper">
+            <div id="map"></div>
+            <div id="info">
+               <h3>POIs near Fort Collins</h3>
+               <div>1-mile radius from downtown</div>
+               <div id="count" style="margin-top: 6px; color: #666"></div>
+            </div>
+         </div>
+      </div>
+
+      <!-- --------------------------------------------------------- -->
+
+      <!-- TAB 3 — RPC Calls -->
+      <div class="tab-content" id="tab3">
+         <div class="tab-title">RPC Calls</div>
+
+         <div class="rpc-section">
+            <h3>How Data Flows</h3>
+            <p>
+               The browser never talks to the database directly. Instead,
+               it makes an OGC WFS (Web Feature Service) request to
+               GeoServer, which translates it into SQL against yugabyteDB.
+               The geohash optimization lives in a GeoServer SQL View layer
+               that converts the bounding box into geohash cell lookups,
+               hitting a B-tree index instead of scanning the full table.
+            </p>
+
+            <div class="arrow">
+               Browser &rarr; GeoServer &rarr; yugabyteDB
+            </div>
+
+            <h3>Step 1: Browser to GeoServer</h3>
+            <p>
+               The HTML page builds a WFS GetFeature request with the map
+               viewport bounding box passed as <code>viewparams</code>. The
+               Flask app proxies the request to GeoServer to avoid CORS
+               issues.
+            </p>
+            <span class="label">WFS Request URL</span>
+            <pre id="rpc_wfs_url"></pre>
+
+            <h3>Step 2: GeoServer to yugabyteDB</h3>
+            <p>
+               GeoServer substitutes the viewparams into the SQL View
+               definition and sends the resulting query to yugabyteDB. The
+               key is
+               <code>LEFT(geo_hash10, 5) = ANY(ARRAY(...))</code> which
+               hits index <code>ix_mapdata3</code> &mdash; a B-tree on the
+               5-character geohash prefix. This replaces the full table
+               scan that a native PostGIS <code>ST_DWithin</code> or
+               <code>&amp;&amp;</code>
+               operator would cause (since yugabyteDB has no GiST index
+               support).
+            </p>
+            <span class="label">SQL sent to yugabyteDB</span>
+            <pre>EXPLAIN (ANALYZE, VERBOSE, DIST)
+SELECT
+  md_pk, md_name, md_address, md_city,
+  md_province, md_postcode, md_category,
+  md_subcategory, geom
+FROM
+  my_mapdata
+WHERE
+  LEFT(geo_hash10, 5) = ANY(
+    ARRAY(SELECT geohash_cells_for_bbox(
+       <span id="rpc_lon_min"></span>,
+       <span id="rpc_lat_min"></span>,
+       <span id="rpc_lon_max"></span>,
+       <span id="rpc_lat_max"></span>,
+       5
+    ))
+  )</pre>
+
+            <h3>Step 3: Index Used</h3>
+            <p>
+               The query planner resolves
+               <code>geohash_cells_for_bbox</code> to a small set of
+               precision-5 geohash strings (each covering ~2.4 miles). For
+               a 1-mile radius, this is roughly 4 cells. The
+               <code>= ANY(ARRAY(...))</code> predicate then uses
+               <code>ix_mapdata3</code> to retrieve only the matching rows
+               from yugabyteDB's LSM storage &mdash; typically a few
+               hundred rows instead of the full 344,688.
+            </p>
+            <span class="label">Index</span>
+            <pre>
+ix_mapdata3 ON my_mapdata (LEFT(geo_hash10, 5), md_name)
+
+-- Without geohash optimization:  Seq Scan,  344,688 rows,  ~5.2 seconds
+-- With geohash optimization:     Index Scan, ~few hundred rows, sub-second</pre
+            >
+
+            <h3>Step 4: Response</h3>
+            <p>
+               yugabyteDB returns the matching rows to GeoServer. GeoServer
+               serializes them as GeoJSON wrapped in a JSONP callback, and
+               the browser renders them as map markers. A client-side
+               Haversine filter trims to the exact circular radius.
+            </p>
+         </div>
+      </div>
+
+      <!-- --------------------------------------------------------- -->
+
+      <!-- Leaflet JS -->
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+      <script src="/static/60_index.js"></script>
+   </body>
+
+   <!-- ------------------------------------------------------------ -->
+   <!-- ------------------------------------------------------------ -->
+</html>
