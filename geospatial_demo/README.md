@@ -6,19 +6,33 @@ extension on YugabyteDB. No dependency on the upstream `geospatial_v05/` repo.
 ## Directory Layout
 
 ```
-geospatial_demo/                         # This folder
-├── README.md                            # This file
-├── run_demo.sh                          # One-command start/stop/clean/verify
-├── data/
-│   └── 19_mapData.pipe.gz              # 344K Colorado POI records (compressed)
-└── demo/
-    ├── 60_index.py                      # Flask demo app
-    ├── properties.ini                   # DB connection config
-    ├── libraries/                       # Python helper modules
-    ├── static/                          # CSS, JS, logo
-    ├── views/                           # HTML template (Leaflet map)
-    └── slides/                          # Presentation images
+<your-workspace>/
+├── yugabyte-db/                         # YugabyteDB source (sibling repo)
+│   └── src/postgres/yb-extensions/
+│       └── yb_geospatial/
+│           ├── yb_geospatial--1.0.sql   # Extension SQL (160+ functions, types, etc.)
+│           ├── yb_geospatial.control
+│           ├── Makefile
+│           ├── sql/yb_geospatial.sql    # Regression test
+│           └── expected/yb_geospatial.out
+│
+└── geohash-related/                     # This repo
+    └── geospatial_demo/                 # <-- You are here
+        ├── README.md                    # This file
+        ├── run_demo.sh                  # One-command start/stop/clean/verify
+        ├── data/
+        │   └── 19_mapData.pipe.gz       # 344K Colorado POI records (compressed)
+        └── demo/
+            ├── 60_index.py              # Flask demo app
+            ├── properties.ini           # DB connection config
+            ├── libraries/               # Python helper modules
+            ├── static/                  # CSS, JS, logo
+            ├── views/                   # HTML template (Leaflet map)
+            └── slides/                  # Presentation images
 ```
+
+The script expects `yugabyte-db/` to be a sibling of `geohash-related/`.
+Override with `YB_SRC_DIR` if your layout differs.
 
 ---
 
