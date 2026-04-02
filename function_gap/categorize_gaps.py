@@ -119,7 +119,10 @@ def main():
             name = extract_name(row[1])
 
             cat, reason = "", ""
-            if name and has_it == "No":
+            if name and has_it == "Yes":
+                cat = "Supported"
+                reason = "Current yb_geospatial extension"
+            elif name and has_it == "No":
                 cat, reason = categorize(name)
                 if cat.startswith("Blocked"):
                     cat1 += 1
