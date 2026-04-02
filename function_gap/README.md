@@ -14,9 +14,10 @@ A Python script that analyzes the missing ("No") functions and categorizes them 
 - **Category 1: Blocked by C/C++ library**: PostGIS relies on massive external compiled libraries (e.g., `libxml2`, `GDAL`, `PROJ`, `protobuf-c`). Since `yb_geospatial` is a pure PL/pgSQL extension, any function wrapping these libraries physically cannot be implemented.
 - **Category 2: Not 2D (3D/4D architectural gap)**: The `geometry` composite type in YB strictly uses `lon[]` and `lat[]` arrays. PostGIS functions demanding an elevation (`Z`) or measure/time (`M`) dimension are structurally incompatible.
 - **Category 3: Architectural mismatch**: Functions that assume internal PostgreSQL C-structures that YB does not use. For example:
-  - Legacy PostGIS catalog tracking (`geometry_columns` table vs modern native typmods).
   - GiST index float-precision structs (`box2df`, `gidx`), which are irrelevant because YB uses LSM-trees + geohashing instead of GiST R-trees.
   - Curve geometries (circular arcs), which aren't supported by our straight-line vertex arrays.
+  - PostGIS-specific version/config reporting that assumes a C binary is installed.
+- **Category 4: Obsolete / Unnecessary**: Legacy PostGIS catalog tracking (`geometry_columns` table metadata management functions) that modern PostgreSQL manages natively via typmods. We can technically implement these, but we intentionally do not need to.
 
 **To run:**
 ```bash

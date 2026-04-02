@@ -4,6 +4,7 @@ Categorize unsupported PostGIS functions into:
   Category 1 — Blocked by external C/C++ library
   Category 2 — Not 2D (3D/4D architectural gap)
   Category 3 — Architectural mismatch (verified reasons)
+  Category 4 — Obsolete / Unnecessary
   (blank)    — Needs manual review
 
 Reads  data/PostGIS-support-functions-result.csv
@@ -84,9 +85,6 @@ def categorize(name):
 
     # --- Category 3: Architectural mismatch ---
 
-    if n_lower in LEGACY_CATALOG_FUNCTIONS:
-        return "Architectural mismatch", "Legacy PostGIS catalog (modern PG uses typmods)"
-
     if n_lower.startswith("postgis_") or n_lower.startswith("postgis."):
         return "Architectural mismatch", "PostGIS-specific version/config (no C binary to report)"
 
@@ -98,12 +96,17 @@ def categorize(name):
     if "box2df" in n_lower and "box2dfrom" not in n_lower:
         return "Architectural mismatch", "GiST/BRIN index C-structs (YB uses LSM-trees + geohash)"
 
+    # --- Category 4: Obsolete / Unnecessary ---
+    
+    if n_lower in LEGACY_CATALOG_FUNCTIONS:
+        return "Obsolete / Unnecessary", "Legacy PostGIS catalog (modern PG uses typmods)"
+
     return "", ""
 
 
 def main():
     rows_out = []
-    cat1 = cat2 = cat3 = blank = 0
+    cat1 = cat2 = cat3 = cat4 = blank = 0
 
     with open(CSV_IN, "r", newline="") as f:
         reader = csv.reader(f)
@@ -130,6 +133,8 @@ def main():
                     cat2 += 1
                 elif cat.startswith("Architectural"):
                     cat3 += 1
+                elif cat.startswith("Obsolete"):
+                    cat4 += 1
                 else:
                     blank += 1
 
@@ -140,11 +145,12 @@ def main():
         writer = csv.writer(f)
         writer.writerows(rows_out)
 
-    total = cat1 + cat2 + cat3 + blank
+    total = cat1 + cat2 + cat3 + cat4 + blank
     print(f"Categorized {total} unsupported functions:")
     print(f"  Category 1 (Blocked by C/C++ library):  {cat1}")
     print(f"  Category 2 (Not 2D):                    {cat2}")
     print(f"  Category 3 (Architectural mismatch):    {cat3}")
+    print(f"  Category 4 (Obsolete / Unnecessary):    {cat4}")
     print(f"  Blank (needs manual review):             {blank}")
     print(f"\nOutput written to: {CSV_OUT}")
 

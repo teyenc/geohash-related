@@ -4,12 +4,12 @@
 ,geometry — The type representing spatial features with planar coordinate systems.,Yes,Supported,Current yb_geospatial extension
 ,geometry_dump — A composite type used to describe the parts of complex geometry.,No,,
 ,geography — The type representing spatial features with geodetic (ellipsoidal) coordinate systems.,Yes,Supported,Current yb_geospatial extension
-7.2. Table Management Functions,AddGeometryColumn — Adds a geometry column to an existing table.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
-,DropGeometryColumn — Removes a geometry column from a spatial table.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
-,DropGeometryTable — Drops a table and all its references in geometry_columns.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
-,Find_SRID — Returns the SRID defined for a geometry column.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
-,Populate_Geometry_Columns — Ensures geometry columns are defined with type modifiers or have appropriate spatial constraints.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
-,"UpdateGeometrySRID — Updates the SRID of all features in a geometry column, and the table metadata.",No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
+7.2. Table Management Functions,AddGeometryColumn — Adds a geometry column to an existing table.,No,Obsolete / Unnecessary,Legacy PostGIS catalog (modern PG uses typmods)
+,DropGeometryColumn — Removes a geometry column from a spatial table.,No,Obsolete / Unnecessary,Legacy PostGIS catalog (modern PG uses typmods)
+,DropGeometryTable — Drops a table and all its references in geometry_columns.,No,Obsolete / Unnecessary,Legacy PostGIS catalog (modern PG uses typmods)
+,Find_SRID — Returns the SRID defined for a geometry column.,No,Obsolete / Unnecessary,Legacy PostGIS catalog (modern PG uses typmods)
+,Populate_Geometry_Columns — Ensures geometry columns are defined with type modifiers or have appropriate spatial constraints.,No,Obsolete / Unnecessary,Legacy PostGIS catalog (modern PG uses typmods)
+,"UpdateGeometrySRID — Updates the SRID of all features in a geometry column, and the table metadata.",No,Obsolete / Unnecessary,Legacy PostGIS catalog (modern PG uses typmods)
 7.3. Geometry Constructors,ST_Collect — Creates a GeometryCollection or Multi* geometry from a set of geometries.,No,,
 ,ST_LineFromMultiPoint — Creates a LineString from a MultiPoint geometry.,No,,
 ,ST_MakeEnvelope — Creates a rectangular Polygon from minimum and maximum coordinates.,Yes,Supported,Current yb_geospatial extension
