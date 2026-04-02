@@ -4,12 +4,12 @@
 ,geometry — The type representing spatial features with planar coordinate systems.,Yes,,
 ,geometry_dump — A composite type used to describe the parts of complex geometry.,No,,
 ,geography — The type representing spatial features with geodetic (ellipsoidal) coordinate systems.,Yes,,
-7.2. Table Management Functions,AddGeometryColumn — Adds a geometry column to an existing table.,No,,
-,DropGeometryColumn — Removes a geometry column from a spatial table.,No,,
-,DropGeometryTable — Drops a table and all its references in geometry_columns.,No,,
-,Find_SRID — Returns the SRID defined for a geometry column.,No,,
-,Populate_Geometry_Columns — Ensures geometry columns are defined with type modifiers or have appropriate spatial constraints.,No,,
-,"UpdateGeometrySRID — Updates the SRID of all features in a geometry column, and the table metadata.",No,,
+7.2. Table Management Functions,AddGeometryColumn — Adds a geometry column to an existing table.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
+,DropGeometryColumn — Removes a geometry column from a spatial table.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
+,DropGeometryTable — Drops a table and all its references in geometry_columns.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
+,Find_SRID — Returns the SRID defined for a geometry column.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
+,Populate_Geometry_Columns — Ensures geometry columns are defined with type modifiers or have appropriate spatial constraints.,No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
+,"UpdateGeometrySRID — Updates the SRID of all features in a geometry column, and the table metadata.",No,Architectural mismatch,Legacy PostGIS catalog (modern PG uses typmods)
 7.3. Geometry Constructors,ST_Collect — Creates a GeometryCollection or Multi* geometry from a set of geometries.,No,,
 ,ST_LineFromMultiPoint — Creates a LineString from a MultiPoint geometry.,No,,
 ,ST_MakeEnvelope — Creates a rectangular Polygon from minimum and maximum coordinates.,Yes,,
@@ -42,10 +42,10 @@
 ,ST_ExteriorRing — Returns a LineString representing the exterior ring of a Polygon.,No,,
 ,ST_GeometryN — Return an element of a geometry collection.,No,,
 ,ST_GeometryType — Returns the SQL-MM type of a geometry as text.,Yes,,
-,ST_HasArc — Tests if a geometry contains a circular arc,No,,
+,ST_HasArc — Tests if a geometry contains a circular arc,No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
 ,ST_InteriorRingN — Returns the Nth interior ring (hole) of a Polygon.,No,,
-,ST_NumCurves — Return the number of component curves in a CompoundCurve.,No,,
-,ST_CurveN — Returns the Nth component curve geometry of a CompoundCurve.,No,,
+,ST_NumCurves — Return the number of component curves in a CompoundCurve.,No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
+,ST_CurveN — Returns the Nth component curve geometry of a CompoundCurve.,No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
 ,ST_IsClosed — Tests if a LineStrings's start and end points are coincident. For a PolyhedralSurface tests if it is closed (volumetric).,Yes,,
 ,ST_IsCollection — Tests if a geometry is a geometry collection type.,No,,
 ,ST_IsEmpty — Tests if a geometry is empty.,Yes,,
@@ -77,7 +77,7 @@
 7.5. Geometry Editors,ST_AddPoint — Add a point to a LineString.,Yes,,
 ,"ST_CollectionExtract — Given a geometry collection, returns a multi-geometry containing only elements of a specified type.",No,,
 ,ST_CollectionHomogenize — Returns the simplest representation of a geometry collection.,No,,
-,ST_CurveToLine — Converts a geometry containing curves to a linear geometry.,No,,
+,ST_CurveToLine — Converts a geometry containing curves to a linear geometry.,No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
 ,ST_Scroll — Change start point of a closed LineString.,No,,
 ,ST_FlipCoordinates — Returns a version of a geometry with X and Y axis flipped.,Yes,,
 ,"ST_Force2D — Force the geometries into a ""2-dimensional mode"".",Yes,,
@@ -86,13 +86,13 @@
 ,ST_Force3DM — Force the geometries into XYM mode.,No,Not 2D (3D/4D architectural gap),OGC M dimension
 ,ST_Force4D — Force the geometries into XYZM mode.,No,Not 2D (3D/4D architectural gap),force4
 ,ST_ForceCollection — Convert the geometry into a GEOMETRYCOLLECTION.,No,,
-,"ST_ForceCurve — Upcast a geometry into its curved type, if applicable.",No,,
+,"ST_ForceCurve — Upcast a geometry into its curved type, if applicable.",No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
 ,ST_ForcePolygonCCW — Orients all exterior rings counter-clockwise and all interior rings clockwise.,Yes,,
 ,ST_ForcePolygonCW — Orients all exterior rings clockwise and all interior rings counter-clockwise.,Yes,,
 ,ST_ForceSFS — Force the geometries to use SFS 1.1 geometry types only.,No,,
 ,ST_ForceRHR — Force the orientation of the vertices in a polygon to follow the Right-Hand-Rule.,No,,
 ,ST_LineExtend — Returns a line extended forwards and backwards by specified distances.,No,,
-,ST_LineToCurve — Converts a linear geometry to a curved geometry.,No,,
+,ST_LineToCurve — Converts a linear geometry to a curved geometry.,No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
 ,ST_Multi — Return the geometry as a MULTI* geometry.,No,,
 ,ST_Normalize — Return the geometry in its canonical form.,No,,
 ,ST_Project — Returns a point projected from a start point by a distance and bearing (azimuth).,Yes,,
@@ -180,13 +180,13 @@
 ,ST_GeoHash — Return a GeoHash representation of the geometry.,No,,
 7.10. Operators,,,,
 7.10.1. Bounding Box Operators,&& — Returns TRUE if A's 2D bounding box intersects B's 2D bounding box.,Yes,,
-,"&&(geometry,box2df) — Returns TRUE if a geometry's (cached) 2D bounding box intersects a 2D float precision bounding box (BOX2DF).",No,,
-,"&&(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) intersects a geometry's (cached) 2D bounding box.",No,,
-,"&&(box2df,box2df) — Returns TRUE if two 2D float precision bounding boxes (BOX2DF) intersect each other.",No,,
+,"&&(geometry,box2df) — Returns TRUE if a geometry's (cached) 2D bounding box intersects a 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"&&(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) intersects a geometry's (cached) 2D bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"&&(box2df,box2df) — Returns TRUE if two 2D float precision bounding boxes (BOX2DF) intersect each other.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
 ,&&& — Returns TRUE if A's n-D bounding box intersects B's n-D bounding box.,No,,
-,"&&&(geometry,gidx) — Returns TRUE if a geometry's (cached) n-D bounding box intersects a n-D float precision bounding box (GIDX).",No,,
-,"&&&(gidx,geometry) — Returns TRUE if a n-D float precision bounding box (GIDX) intersects a geometry's (cached) n-D bounding box.",No,,
-,"&&&(gidx,gidx) — Returns TRUE if two n-D float precision bounding boxes (GIDX) intersect each other.",No,,
+,"&&&(geometry,gidx) — Returns TRUE if a geometry's (cached) n-D bounding box intersects a n-D float precision bounding box (GIDX).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"&&&(gidx,geometry) — Returns TRUE if a n-D float precision bounding box (GIDX) intersects a geometry's (cached) n-D bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"&&&(gidx,gidx) — Returns TRUE if two n-D float precision bounding boxes (GIDX) intersect each other.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
 ,&< — Returns TRUE if A's bounding box overlaps or is to the left of B's.,No,,
 ,&<| — Returns TRUE if A's bounding box overlaps or is below B's.,No,,
 ,&> — Returns TRUE if A' bounding box overlaps or is to the right of B's.,No,,
@@ -195,15 +195,15 @@
 ,#ERROR!,,,
 ,>> — Returns TRUE if A's bounding box is strictly to the right of B's.,No,,
 ,@ — Returns TRUE if A's bounding box is contained by B's.,No,,
-,"@(geometry,box2df) — Returns TRUE if a geometry's 2D bounding box is contained into a 2D float precision bounding box (BOX2DF).",No,,
-,"@(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into a geometry's 2D bounding box.",No,,
-,"@(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into another 2D float precision bounding box.",No,,
+,"@(geometry,box2df) — Returns TRUE if a geometry's 2D bounding box is contained into a 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"@(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into a geometry's 2D bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"@(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into another 2D float precision bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
 ,|&> — Returns TRUE if A's bounding box overlaps or is above B's.,No,,
 ,|>> — Returns TRUE if A's bounding box is strictly above B's.,No,,
 ,~ — Returns TRUE if A's bounding box contains B's.,No,,
-,"~(geometry,box2df) — Returns TRUE if a geometry's 2D bonding box contains a 2D float precision bounding box (GIDX).",No,,
-,"~(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains a geometry's 2D bonding box.",No,,
-,"~(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains another 2D float precision bounding box (BOX2DF).",No,,
+,"~(geometry,box2df) — Returns TRUE if a geometry's 2D bonding box contains a 2D float precision bounding box (GIDX).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"~(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains a geometry's 2D bonding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
+,"~(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains another 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash)
 ,~= — Returns TRUE if A's bounding box is the same as B's.,No,,
 7.10.2. Distance Operators,<-> — Returns the 2D distance between A and B.,Yes,,
 ,|=| — Returns the distance between A and B trajectories at their closest point of approach.,No,,
@@ -283,7 +283,7 @@
 ,ST_MinimumBoundingCircle — Returns the smallest circle polygon that contains a geometry.,No,,
 ,ST_MinimumBoundingRadius — Returns the center point and radius of the smallest circle that contains a geometry.,No,,
 ,ST_OrientedEnvelope — Returns a minimum-area rectangle containing a geometry.,No,,
-,ST_OffsetCurve — Returns an offset line at a given distance and side from an input line.,No,,
+,ST_OffsetCurve — Returns an offset line at a given distance and side from an input line.,No,Architectural mismatch,Curve geometries (YB type only stores straight-line vertices)
 ,"ST_PointOnSurface — Computes a point guaranteed to lie in a polygon, or on a geometry.",No,,
 ,ST_Polygonize — Computes a collection of polygons formed from the linework of a set of geometries.,No,,
 ,ST_ReducePrecision — Returns a valid geometry with points rounded to a grid tolerance.,No,,
@@ -345,27 +345,27 @@
 ,ST_ClosestPointOfApproach — Returns a measure at the closest point of approach of two trajectories.,No,,
 ,ST_DistanceCPA — Returns the distance between the closest point of approach of two trajectories.,No,Not 2D (3D/4D architectural gap),cpa
 ,ST_CPAWithin — Tests if the closest point of approach of two trajectories is within the specified distance.,No,Not 2D (3D/4D architectural gap),cpa
-7.21. Version Functions,"PostGIS_Extensions_Upgrade — Packages and upgrades PostGIS extensions (e.g. postgis_raster, postgis_topology, postgis_sfcgal) to given or latest version.",No,,
+7.21. Version Functions,"PostGIS_Extensions_Upgrade — Packages and upgrades PostGIS extensions (e.g. postgis_raster, postgis_topology, postgis_sfcgal) to given or latest version.",No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
 ,PostGIS_Full_Version — Reports full PostGIS version and build configuration infos.,Yes,,
 ,PostGIS_GEOS_Version — Returns the version number of the GEOS library.,Yes,,
-,PostGIS_GEOS_Compiled_Version — Returns the version number of the GEOS library against which PostGIS was built.,No,,
-,PostGIS_Liblwgeom_Version — Returns the version number of the liblwgeom library. This should match the version of PostGIS.,No,,
-,PostGIS_LibXML_Version — Returns the version number of the libxml2 library.,No,,
-,PostGIS_LibJSON_Version — Returns the version number of the libjson-c library.,No,,
-,PostGIS_Lib_Build_Date — Returns build date of the PostGIS library.,No,,
+,PostGIS_GEOS_Compiled_Version — Returns the version number of the GEOS library against which PostGIS was built.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_Liblwgeom_Version — Returns the version number of the liblwgeom library. This should match the version of PostGIS.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_LibXML_Version — Returns the version number of the libxml2 library.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_LibJSON_Version — Returns the version number of the libjson-c library.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_Lib_Build_Date — Returns build date of the PostGIS library.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
 ,PostGIS_Lib_Version — Returns the version number of the PostGIS library.,Yes,,
-,PostGIS_PROJ_Version — Returns the version number of the PROJ4 library.,No,,
-,PostGIS_PROJ_Compiled_Version — Returns the version number of the PROJ library against which PostGIS was built.,No,,
-,PostGIS_Wagyu_Version — Returns the version number of the internal Wagyu library.,No,,
-,PostGIS_Scripts_Build_Date — Returns build date of the PostGIS scripts.,No,,
-,PostGIS_Scripts_Installed — Returns version of the PostGIS scripts installed in this database.,No,,
-,PostGIS_Scripts_Released — Returns the version number of the postgis.sql script released with the installed PostGIS lib.,No,,
+,PostGIS_PROJ_Version — Returns the version number of the PROJ4 library.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_PROJ_Compiled_Version — Returns the version number of the PROJ library against which PostGIS was built.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_Wagyu_Version — Returns the version number of the internal Wagyu library.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_Scripts_Build_Date — Returns build date of the PostGIS scripts.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_Scripts_Installed — Returns version of the PostGIS scripts installed in this database.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_Scripts_Released — Returns the version number of the postgis.sql script released with the installed PostGIS lib.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
 ,PostGIS_Version — Returns PostGIS version number and compile-time options.,Yes,,
 7.22. Grand Unified Custom Variables (GUCs),"postgis.gdal_datapath — A configuration option to assign the value of GDAL's GDAL_DATA option. If not set, the environmentally set GDAL_DATA variable is used.",No,Blocked by C/C++ library,GDAL
 ,postgis.gdal_enabled_drivers — A configuration option to set the enabled GDAL drivers in the PostGIS environment. Affects the GDAL configuration variable GDAL_SKIP.,No,Blocked by C/C++ library,GDAL
 ,postgis.enable_outdb_rasters — A boolean configuration option to enable access to out-db raster bands.,No,Blocked by C/C++ library,GDAL
 ,postgis.gdal_vsi_options — A string configuration to set options used when working with an out-db raster.,No,Blocked by C/C++ library,GDAL
 ,postgis.gdal_cpl_debug — A boolean configuration to turn logging of GDAL debug messages on and off.,No,Blocked by C/C++ library,GDAL
-7.23. Troubleshooting Functions,PostGIS_AddBBox — Add bounding box to the geometry.,No,,
-,PostGIS_DropBBox — Drop the bounding box cache from the geometry.,No,,
-,"PostGIS_HasBBox — Returns TRUE if the bbox of this geometry is cached, FALSE otherwise.",No,,
+7.23. Troubleshooting Functions,PostGIS_AddBBox — Add bounding box to the geometry.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,PostGIS_DropBBox — Drop the bounding box cache from the geometry.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
+,"PostGIS_HasBBox — Returns TRUE if the bbox of this geometry is cached, FALSE otherwise.",No,Architectural mismatch,PostGIS-specific version/config (no C binary to report)
