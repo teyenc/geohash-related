@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ST_ClipByBox2D — Sutherland-Hodgman Visualization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px;
+        }
+        h1 { margin-bottom: 5px; color: #38bdf8; }
+        p { margin-bottom: 20px; color: #94a3b8; max-width: 850px; text-align: center; line-height: 1.5; }
+        code { color: #fbbf24; background: #1e293b; padding: 2px 6px; border-radius: 3px; }
+        .canvas-container {
+            position: relative;
+            background-color: #1e293b;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        canvas {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            position: absolute;
+            bottom: 25px;
+            right: 25px;
+        }
+        .controls button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        #replayBtn { background: #38bdf8; color: #0f172a; }
+        #stepBtn { background: #a78bfa; color: #0f172a; }
+        .status-bar {
+            position: absolute;
+            top: 25px;
+            left: 25px;
+            right: 25px;
+            display: flex;
+            gap: 8px;
+        }
+        .step-indicator {
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 2px solid #334155;
+            background: #1e293b;
+            color: #64748b;
+            transition: all 0.3s;
+        }
+        .step-indicator.active {
+            border-color: #f472b6;
+            background: rgba(244, 114, 182, 0.15);
+            color: #f472b6;
+        }
+        .step-indicator.done {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+        }
+        .legend {
+            display: flex;
+            gap: 24px;
+            margin-top: 20px;
+            background-color: #1e293b;
+            padding: 15px 25px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .box { width: 16px; height: 16px; border-radius: 3px; }
+        .box-orig { border: 2px dashed #fbbf24; }
+        .box-clip { border: 2px solid #38bdf8; background-color: rgba(56, 189, 248, 0.1); }
+        .box-result { border: 2px solid #10b981; background-color: rgba(16, 185, 129, 0.3); }
+        .box-edge { background: rgba(244, 114, 182, 0.5); border: 2px solid #f472b6; }
+        .box-interp { border-radius: 50%; background: #f472b6; border: 2px solid #f472b6; }
+        .info {
+            margin-top: 20px;
+            background-color: #1e293b;
+            padding: 20px 25px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            max-width: 850px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #94a3b8;
+        }
+        .info table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+        .info th, .info td { padding: 6px 12px; text-align: left; border-bottom: 1px solid #334155; }
+        .info th { color: #f8fafc; font-size: 13px; }
+        .info td { font-size: 13px; }
+    </style>
+</head>
+<body>
+
+    <h1>ST_ClipByBox2D — Sutherland-Hodgman</h1>
+    <p>
+        Clips a polygon to an axis-aligned bounding box by processing one edge at a time.<br>
+        Each pass walks every polygon edge and keeps/discards/interpolates vertices against the clip boundary.
+    </p>
+
+    <div class="canvas-container">
+        <div class="status-bar">
+            <div class="step-indicator" id="step0">Original</div>
+            <div class="step-indicator" id="step1">1. Left</div>
+            <div class="step-indicator" id="step2">2. Right</div>
+            <div class="step-indicator" id="step3">3. Bottom</div>
+            <div class="step-indicator" id="step4">4. Top</div>
+            <div class="step-indicator" id="step5">Result</div>
+        </div>
+        <canvas id="clipCanvas" width="850" height="600"></canvas>
+        <div class="controls">
+            <button id="stepBtn">Step →</button>
+            <button id="replayBtn">Auto Replay</button>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="box box-orig"></div> Original Polygon</div>
+        <div class="legend-item"><div class="box box-clip"></div> Clip Box</div>
+        <div class="legend-item"><div class="box box-edge"></div> Active Clip Edge</div>
+        <div class="legend-item"><div class="box box-result"></div> Clipped Result</div>
+        <div class="legend-item"><div class="box box-interp"></div> Interpolated Vertex</div>
+    </div>
+
+    <div class="info">
+        <strong style="color: #f8fafc;">Sutherland-Hodgman edge rule (applied per edge):</strong>
+        <table>
+            <tr><th>Start</th><th>End</th><th>Action</th></tr>
+            <tr><td style="color:#10b981">Inside</td><td style="color:#10b981">Inside</td><td>Keep start vertex</td></tr>
+            <tr><td style="color:#10b981">Inside</td><td style="color:#ef4444">Outside</td><td>Keep start + add <span style="color:#f472b6">intersection</span></td></tr>
+            <tr><td style="color:#ef4444">Outside</td><td style="color:#10b981">Inside</td><td>Add <span style="color:#f472b6">intersection</span> only</td></tr>
+            <tr><td style="color:#ef4444">Outside</td><td style="color:#ef4444">Outside</td><td>Emit nothing</td></tr>
+        </table>
+        <code>ST_ClipByBox2D</code> runs this 4 times (left → right → bottom → top).
+        The output of each pass becomes the input for the next.
+    </div>
+
+    <script>
+        const canvas = document.getElementById('clipCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+
+        const PAD = 60;
+        const DRAW_X0 = PAD, DRAW_Y0 = PAD + 30;
+        const DRAW_W = W - 2 * PAD, DRAW_H = H - 2 * PAD - 30;
+
+        // World coords: polygon extends beyond the clip box on multiple sides
+        const WORLD = { xmin: -2, xmax: 12, ymin: -2, ymax: 10 };
+
+        function toScreen(wx, wy) {
+            const sx = DRAW_X0 + ((wx - WORLD.xmin) / (WORLD.xmax - WORLD.xmin)) * DRAW_W;
+            const sy = DRAW_Y0 + ((WORLD.ymax - wy) / (WORLD.ymax - WORLD.ymin)) * DRAW_H;
+            return [sx, sy];
+        }
+
+        // Clip box
+        const BOX = { xmin: 2, xmax: 8, ymin: 1, ymax: 7 };
+
+        // Original polygon — deliberately extends outside the box on several sides
+        const ORIG_POLY = [
+            { x: 0, y: 3 },
+            { x: 3, y: 9 },
+            { x: 7, y: 8 },
+            { x: 10, y: 5 },
+            { x: 9, y: 0 },
+            { x: 5, y: -1 },
+            { x: 1, y: 1 }
+        ];
+
+        // Sutherland-Hodgman clipping against one edge
+        function clipAgainstEdge(poly, edgeType, box) {
+            const out = [];
+            const n = poly.length;
+            if (n === 0) return out;
+
+            const interpolated = [];
+
+            function inside(p) {
+                switch (edgeType) {
+                    case 'left':   return p.x >= box.xmin;
+                    case 'right':  return p.x <= box.xmax;
+                    case 'bottom': return p.y >= box.ymin;
+                    case 'top':    return p.y <= box.ymax;
+                }
+            }
+
+            function intersect(a, b) {
+                let t;
+                switch (edgeType) {
+                    case 'left':
+                        t = (box.xmin - a.x) / (b.x - a.x);
+                        return { x: box.xmin, y: a.y + t * (b.y - a.y), interp: true };
+                    case 'right':
+                        t = (box.xmax - a.x) / (b.x - a.x);
+                        return { x: box.xmax, y: a.y + t * (b.y - a.y), interp: true };
+                    case 'bottom':
+                        t = (box.ymin - a.y) / (b.y - a.y);
+                        return { x: a.x + t * (b.x - a.x), y: box.ymin, interp: true };
+                    case 'top':
+                        t = (box.ymax - a.y) / (b.y - a.y);
+                        return { x: a.x + t * (b.x - a.x), y: box.ymax, interp: true };
+                }
+            }
+
+            for (let i = 0; i < n; i++) {
+                const cur = poly[i];
+                const nxt = poly[(i + 1) % n];
+                const curIn = inside(cur);
+                const nxtIn = inside(nxt);
+
+                if (curIn && nxtIn) {
+                    out.push(cur);
+                } else if (curIn && !nxtIn) {
+                    out.push(cur);
+                    out.push(intersect(cur, nxt));
+                } else if (!curIn && nxtIn) {
+                    out.push(intersect(cur, nxt));
+                }
+                // both outside: emit nothing
+            }
+            return out;
+        }
+
+        // Pre-compute all intermediate polygons
+        const EDGES = ['left', 'right', 'bottom', 'top'];
+        const stages = [ORIG_POLY.map(p => ({...p}))]; // stage 0 = original
+
+        let current = ORIG_POLY.map(p => ({...p}));
+        for (const edge of EDGES) {
+            current = clipAgainstEdge(current, edge, BOX);
+            stages.push(current.map(p => ({...p})));
+        }
+        // stages: [original, after-left, after-right, after-bottom, after-top]
+
+        // ---- Drawing functions ----
+
+        function drawCoordGrid() {
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 0.5;
+            for (let x = Math.ceil(WORLD.xmin); x <= Math.floor(WORLD.xmax); x++) {
+                const [sx] = toScreen(x, 0);
+                ctx.beginPath(); ctx.moveTo(sx, DRAW_Y0); ctx.lineTo(sx, DRAW_Y0 + DRAW_H); ctx.stroke();
+            }
+            for (let y = Math.ceil(WORLD.ymin); y <= Math.floor(WORLD.ymax); y++) {
+                const [, sy] = toScreen(0, y);
+                ctx.beginPath(); ctx.moveTo(DRAW_X0, sy); ctx.lineTo(DRAW_X0 + DRAW_W, sy); ctx.stroke();
+            }
+        }
+
+        function drawBox() {
+            const [x1, y1] = toScreen(BOX.xmin, BOX.ymax);
+            const [x2, y2] = toScreen(BOX.xmax, BOX.ymin);
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.05)';
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+            // Corner labels
+            ctx.fillStyle = '#38bdf8';
+            ctx.font = '11px monospace';
+            const corners = [
+                [BOX.xmin, BOX.ymin, 'left', 'bottom'],
+                [BOX.xmax, BOX.ymin, 'right', 'bottom'],
+                [BOX.xmin, BOX.ymax, 'left', 'top'],
+                [BOX.xmax, BOX.ymax, 'right', 'top']
+            ];
+            for (const [wx, wy, halign, valign] of corners) {
+                const [sx, sy] = toScreen(wx, wy);
+                const label = `(${wx},${wy})`;
+                const xoff = halign === 'left' ? -45 : 5;
+                const yoff = valign === 'bottom' ? 16 : -6;
+                ctx.fillText(label, sx + xoff, sy + yoff);
+            }
+        }
+
+        function drawActiveEdge(edgeName) {
+            ctx.save();
+            ctx.strokeStyle = '#f472b6';
+            ctx.lineWidth = 4;
+            ctx.shadowColor = '#f472b6';
+            ctx.shadowBlur = 12;
+            let a, b;
+            switch (edgeName) {
+                case 'left':
+                    a = toScreen(BOX.xmin, WORLD.ymin - 1);
+                    b = toScreen(BOX.xmin, WORLD.ymax + 1);
+                    break;
+                case 'right':
+                    a = toScreen(BOX.xmax, WORLD.ymin - 1);
+                    b = toScreen(BOX.xmax, WORLD.ymax + 1);
+                    break;
+                case 'bottom':
+                    a = toScreen(WORLD.xmin - 1, BOX.ymin);
+                    b = toScreen(WORLD.xmax + 1, BOX.ymin);
+                    break;
+                case 'top':
+                    a = toScreen(WORLD.xmin - 1, BOX.ymax);
+                    b = toScreen(WORLD.xmax + 1, BOX.ymax);
+                    break;
+            }
+            ctx.beginPath();
+            ctx.moveTo(a[0], a[1]);
+            ctx.lineTo(b[0], b[1]);
+            ctx.stroke();
+
+            // Label the edge
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillStyle = '#f472b6';
+            const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+            const labels = { left: 'x ≥ xmin', right: 'x ≤ xmax', bottom: 'y ≥ ymin', top: 'y ≤ ymax' };
+            const offsets = { left: [-65, 0], right: [10, 0], bottom: [0, 18], top: [0, -8] };
+            ctx.fillText(labels[edgeName], mid[0] + offsets[edgeName][0], mid[1] + offsets[edgeName][1]);
+            ctx.restore();
+        }
+
+        function drawPolygon(poly, stroke, fill, dash, lineWidth) {
+            if (poly.length < 2) return;
+            ctx.save();
+            ctx.strokeStyle = stroke;
+            ctx.fillStyle = fill;
+            ctx.lineWidth = lineWidth || 2.5;
+            if (dash) ctx.setLineDash(dash);
+
+            ctx.beginPath();
+            const [sx0, sy0] = toScreen(poly[0].x, poly[0].y);
+            ctx.moveTo(sx0, sy0);
+            for (let i = 1; i < poly.length; i++) {
+                const [sx, sy] = toScreen(poly[i].x, poly[i].y);
+                ctx.lineTo(sx, sy);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
+
+        function drawVertices(poly, color, radius) {
+            for (const p of poly) {
+                const [sx, sy] = toScreen(p.x, p.y);
+                ctx.beginPath();
+                ctx.arc(sx, sy, radius || 5, 0, Math.PI * 2);
+                if (p.interp) {
+                    ctx.fillStyle = '#f472b6';
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.fill();
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                }
+            }
+        }
+
+        function drawVertexLabels(poly) {
+            ctx.font = '11px monospace';
+            for (let i = 0; i < poly.length; i++) {
+                const p = poly[i];
+                const [sx, sy] = toScreen(p.x, p.y);
+                const label = `(${p.x.toFixed(1)},${p.y.toFixed(1)})`;
+                ctx.fillStyle = p.interp ? '#f472b6' : '#94a3b8';
+                ctx.fillText(label, sx + 8, sy - 8);
+            }
+        }
+
+        // Shade the "outside" region for a given edge
+        function shadeOutside(edgeName) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
+            const tl = toScreen(WORLD.xmin, WORLD.ymax);
+            const br = toScreen(WORLD.xmax, WORLD.ymin);
+            let x, y, w, h;
+            switch (edgeName) {
+                case 'left':
+                    x = tl[0]; y = tl[1];
+                    w = toScreen(BOX.xmin, 0)[0] - tl[0];
+                    h = br[1] - tl[1];
+                    break;
+                case 'right':
+                    x = toScreen(BOX.xmax, 0)[0]; y = tl[1];
+                    w = br[0] - x;
+                    h = br[1] - tl[1];
+                    break;
+                case 'bottom':
+                    x = tl[0]; y = toScreen(0, BOX.ymin)[1];
+                    w = br[0] - tl[0];
+                    h = br[1] - y;
+                    break;
+                case 'top':
+                    x = tl[0]; y = tl[1];
+                    w = br[0] - tl[0];
+                    h = toScreen(0, BOX.ymax)[1] - tl[1];
+                    break;
+            }
+            ctx.fillRect(x, y, w, h);
+
+            // Diagonal hatch
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.12)';
+            ctx.lineWidth = 1;
+            const step = 14;
+            ctx.beginPath();
+            for (let d = 0; d < w + h; d += step) {
+                ctx.moveTo(x + Math.min(d, w), y + Math.max(0, d - w));
+                ctx.lineTo(x + Math.max(0, d - h), y + Math.min(d, h));
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // ---- State machine ----
+        let currentStage = 0; // 0=original, 1-4=after each edge, 5=final highlight
+
+        function updateStepIndicators() {
+            for (let i = 0; i <= 5; i++) {
+                const el = document.getElementById(`step${i}`);
+                el.className = 'step-indicator';
+                if (i < currentStage) el.classList.add('done');
+                else if (i === currentStage) el.classList.add('active');
+            }
+        }
+
+        function renderStage() {
+            ctx.clearRect(0, 0, W, H);
+            drawCoordGrid();
+
+            if (currentStage === 0) {
+                // Show original polygon + box
+                drawBox();
+                drawPolygon(stages[0], '#fbbf24', 'rgba(251, 191, 36, 0.15)', [8, 6]);
+                drawVertices(stages[0], '#fbbf24');
+                drawVertexLabels(stages[0]);
+            } else if (currentStage >= 1 && currentStage <= 4) {
+                const edgeIdx = currentStage - 1;
+                const edgeName = EDGES[edgeIdx];
+                const inputPoly = stages[edgeIdx];
+                const outputPoly = stages[edgeIdx + 1];
+
+                shadeOutside(edgeName);
+                drawBox();
+
+                // Ghost of original polygon
+                drawPolygon(stages[0], 'rgba(251, 191, 36, 0.2)', 'transparent', [4, 4], 1);
+
+                // Input polygon (what we're clipping)
+                drawPolygon(inputPoly, 'rgba(251, 191, 36, 0.5)', 'rgba(251, 191, 36, 0.08)', [6, 4], 2);
+
+                // Active clip edge
+                drawActiveEdge(edgeName);
+
+                // Output polygon (result after this edge)
+                drawPolygon(outputPoly, '#10b981', 'rgba(16, 185, 129, 0.2)', null, 3);
+                drawVertices(outputPoly, '#10b981');
+                drawVertexLabels(outputPoly);
+            } else {
+                // Final result
+                drawBox();
+                drawPolygon(stages[0], 'rgba(251, 191, 36, 0.15)', 'transparent', [4, 4], 1);
+                drawPolygon(stages[stages.length - 1], '#10b981', 'rgba(16, 185, 129, 0.3)', null, 3);
+                drawVertices(stages[stages.length - 1], '#10b981', 6);
+                drawVertexLabels(stages[stages.length - 1]);
+            }
+
+            updateStepIndicators();
+        }
+
+        function step() {
+            currentStage = Math.min(currentStage + 1, 5);
+            renderStage();
+        }
+
+        let autoTimer = null;
+        function autoReplay() {
+            clearInterval(autoTimer);
+            currentStage = 0;
+            renderStage();
+            autoTimer = setInterval(() => {
+                if (currentStage >= 5) { clearInterval(autoTimer); return; }
+                step();
+            }, 1500);
+        }
+
+        document.getElementById('stepBtn').addEventListener('click', step);
+        document.getElementById('replayBtn').addEventListener('click', autoReplay);
+
+        // Initial render
+        renderStage();
+    </script>
+</body>
+</html>

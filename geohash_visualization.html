@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geohash Bounding Box Visualization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px;
+        }
+        h1 { margin-bottom: 5px; color: #38bdf8; }
+        p { margin-bottom: 30px; color: #94a3b8; max-width: 800px; text-align: center; line-height: 1.5; }
+        .canvas-container {
+            position: relative;
+            background-color: #1e293b;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        canvas {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+        }
+        .legend {
+            display: flex;
+            gap: 24px;
+            margin-top: 20px;
+            background-color: #1e293b;
+            padding: 15px 25px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .box { width: 16px; height: 16px; border-radius: 3px; }
+        .box-poly { border: 2px dashed #fbbf24; }
+        .box-bbox { border: 2px solid #38bdf8; background-color: rgba(56, 189, 248, 0.1); }
+        .box-cell { border: 1px solid #10b981; background-color: rgba(16, 185, 129, 0.2); }
+    </style>
+</head>
+<body>
+
+    <h1>Geohash vs Bounding Box</h1>
+    <p>
+        This visualization shows why <code>geohash_cells_for_bbox</code> "over-fetches". <br>
+        The blue box is the Bounding Box (bbox). The dashed yellow line is the actual polygon. <br>
+        The green squares are the Geohash cells generated to cover the bbox.
+    </p>
+
+    <div class="canvas-container">
+        <canvas id="mapCanvas" width="800" height="600"></canvas>
+        <button id="replayBtn" style="position: absolute; bottom: 20px; right: 20px; padding: 8px 16px; background: #38bdf8; border: none; border-radius: 4px; color: #0f172a; font-weight: bold; cursor: pointer;">Replay Trace</button>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="box box-poly"></div> Actual Search Polygon</div>
+        <div class="legend-item"><div class="box box-bbox"></div> Bounding Box (bbox)</div>
+        <div class="legend-item"><div class="box box-cell"></div> Geohash Cells IN-list</div>
+        <div class="legend-item"><div class="box" style="border: 2px solid #ef4444; background: rgba(239, 68, 68, 0.4);"></div> Trace Path</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Canvas dimensions
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Grid setup (simulating Geohash grid)
+        const cols = 12;
+        const rows = 9;
+        const cellW = width / cols;
+        const cellH = height / rows;
+        
+        // Polygon coordinates (scaled to grid)
+        // Similar to the SLC example: [-111.95, 40.72] to [-111.88, 40.80]
+        const polyPoints = [
+            { x: 3.5, y: 6.5 },  // SW-ish
+            { x: 8.5, y: 7.0 },  // SE-ish
+            { x: 8.2, y: 2.5 },  // NE-ish
+            { x: 5.5, y: 1.5 },  // N-ish
+            { x: 2.8, y: 3.5 }   // NW-ish
+        ];
+        
+        // Calculate Bounding Box of the polygon
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        
+        for (let p of polyPoints) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+
+        // Calculate Geohash cells covering the BBox
+        // (Floor for min, Ceil for max)
+        const gridMinX = Math.floor(minX);
+        const gridMaxX = Math.floor(maxX);
+        const gridMinY = Math.floor(minY);
+        const gridMaxY = Math.floor(maxY);
+
+        function drawGrid() {
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            
+            for (let i = 0; i <= cols; i++) {
+                ctx.beginPath(); ctx.moveTo(i * cellW, 0); ctx.lineTo(i * cellW, height); ctx.stroke();
+            }
+            for (let i = 0; i <= rows; i++) {
+                ctx.beginPath(); ctx.moveTo(0, i * cellH); ctx.lineTo(width, i * cellH); ctx.stroke();
+            }
+
+            // Draw Geohash pseudo-labels
+            ctx.fillStyle = '#334155';
+            ctx.font = '11px monospace';
+            const base = "9x1y";
+            const chars = "0123456789bcdefghjkmnpqrstuvwxyz";
+            for (let c = 0; c < cols; c++) {
+                for (let r = 0; r < rows; r++) {
+                    // Just make up deterministic suffixes for the visual
+                    let suffix1 = chars[(c+r)%32];
+                    let suffix2 = chars[(c*2+r*3)%32];
+                    ctx.fillText(`${base}${suffix1}${suffix2}`, c * cellW + 5, r * cellH + 15);
+                }
+            }
+        }
+
+        let animationTimeout;
+
+        function drawGeohashCells() {
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.2)'; // Emerald 500 transparent
+            ctx.strokeStyle = '#10b981'; // Emerald 500
+            ctx.lineWidth = 2;
+            
+            for (let c = gridMinX; c <= gridMaxX; c++) {
+                for (let r = gridMinY; r <= gridMaxY; r++) {
+                    ctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+                    ctx.strokeRect(c * cellW, r * cellH, cellW, cellH);
+                }
+            }
+        }
+
+        function drawTrace() {
+            let cells = [];
+            // Collect cells in the order the SQL algorithm walks them
+            // The SQL walks: south to north (rows), and within row west to east (cols)
+            // Note: our canvas Y goes from top to bottom (0 is top). 
+            // Let's pretend the bottom of the bounding box is South.
+            for (let r = gridMaxY; r >= gridMinY; r--) {
+                for (let c = gridMinX; c <= gridMaxX; c++) {
+                    cells.push({c: c, r: r});
+                }
+            }
+
+            let index = 0;
+            ctx.lineWidth = 3;
+
+            function traceNextCell() {
+                if (index >= cells.length) return;
+
+                const cell = cells[index];
+                
+                // Draw current cell being processed
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.4)'; // Red-ish
+                ctx.strokeStyle = '#ef4444';
+                ctx.fillRect(cell.c * cellW, cell.r * cellH, cellW, cellH);
+                ctx.strokeRect(cell.c * cellW, cell.r * cellH, cellW, cellH);
+
+                // Draw arrow from previous cell
+                if (index > 0) {
+                    const prev = cells[index - 1];
+                    ctx.beginPath();
+                    // Arrow from center to center
+                    const fromX = prev.c * cellW + cellW/2;
+                    const fromY = prev.r * cellH + cellH/2;
+                    const toX = cell.c * cellW + cellW/2;
+                    const toY = cell.r * cellH + cellH/2;
+                    
+                    ctx.moveTo(fromX, fromY);
+                    ctx.lineTo(toX, toY);
+                    ctx.strokeStyle = '#f87171';
+                    ctx.setLineDash([4, 4]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                // Redraw polygon and bbox on top so they don't get buried
+                drawPolygon();
+                drawBoundingBox();
+
+                index++;
+                animationTimeout = setTimeout(traceNextCell, 200); // 200ms per step
+            }
+
+            traceNextCell();
+        }
+
+        function drawBoundingBox() {
+            ctx.strokeStyle = '#38bdf8'; // Sky 400
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+            ctx.lineWidth = 3;
+            
+            const px = minX * cellW;
+            const py = minY * cellH;
+            const pw = (maxX - minX) * cellW;
+            const ph = (maxY - minY) * cellH;
+            
+            ctx.fillRect(px, py, pw, ph);
+            ctx.strokeRect(px, py, pw, ph);
+
+            // Draw corner points
+            ctx.fillStyle = '#fff';
+            [
+                {x: px, y: py}, {x: px+pw, y: py}, 
+                {x: px, y: py+ph}, {x: px+pw, y: py+ph}
+            ].forEach(pt => {
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function drawPolygon() {
+            ctx.strokeStyle = '#fbbf24'; // Amber 400
+            ctx.fillStyle = 'rgba(251, 191, 36, 0.15)';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 6]);
+            
+            ctx.beginPath();
+            ctx.moveTo(polyPoints[0].x * cellW, polyPoints[0].y * cellH);
+            for (let i = 1; i < polyPoints.length; i++) {
+                ctx.lineTo(polyPoints[i].x * cellW, polyPoints[i].y * cellH);
+            }
+            ctx.closePath();
+            
+            ctx.fill();
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset
+            
+            // Draw polygon vertices
+            ctx.fillStyle = '#fbbf24';
+            for (let p of polyPoints) {
+                ctx.beginPath();
+                ctx.arc(p.x * cellW, p.y * cellH, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function render() {
+            clearTimeout(animationTimeout);
+            ctx.clearRect(0, 0, width, height);
+            drawGrid();
+            drawPolygon();
+            drawBoundingBox();
+            
+            // Start the animated trace 
+            setTimeout(() => {
+                drawTrace();
+            }, 800);
+        }
+
+        document.getElementById('replayBtn').addEventListener('click', render);
+
+        render();
+    </script>
+</body>
+</html>
