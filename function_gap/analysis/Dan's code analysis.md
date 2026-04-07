@@ -146,7 +146,6 @@ Always returns 2\. (stub)
 
 ### `ST_GeomFromText(wkt, srid)`
 
-(stub)  
 2-arg version. SRID accepted but ignored. Delegates to 1-arg version (defined later in Tier 2).
 
 ### `ST_GeomFromWKB(bytea, srid)` / `ST_GeomFromWKB(bytea)`
