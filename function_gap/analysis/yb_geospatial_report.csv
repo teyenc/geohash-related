@@ -11,8 +11,12 @@ PostGIS_GEOS_Version(),Section 1: CreateGeometryType.sql - Define the geometry t
 ST_SRID(p_geom geometry),Section 1: CreateGeometryType.sql - Define the geometry type,Yes,Always returns 4326.,Stub
 "ST_SetSRID(p_geom geometry, p_srid integer)",Section 1: CreateGeometryType.sql - Define the geometry type,Yes,Returns the geometry unchanged.,Stub
 "ST_Transform(p_geom geometry, p_srid integer)",Section 1: CreateGeometryType.sql - Define the geometry type,Yes,Returns the geometry unchanged. In real PostGIS this reprojects coordinates.,Stub
-ST_AsBinary(p_geom geometry),Section 1: CreateGeometryType.sql - Define the geometry type,Yes,"Encodes geometry to OGC Well-Known Binary (little-endian). Handles POINT, LINESTRING, POLYGON, and empty geometries. So basically transfer YB language to Geoserver language",Partial
-lm__float8_to_le_bytea(val double precision),Section 1: CreateGeometryType.sql - Define the geometry type,No (internal helper),Converts a 64-bit float to 8 little-endian bytes. Uses `float8send()` then reverses byte order.,Internal Helper
+ST_AsBinary(p_geom geometry),Section 1: CreateGeometryType.sql - Define the geometry type,Yes,"Encodes geometry to OGC Well-Known Binary (little-endian). Handles POINT, LINESTRING, POLYGON, and empty geometries. 
+
+So basically transfer YB language to Geoserver language",Partial
+lm__float8_to_le_bytea(val double precision),Section 1: CreateGeometryType.sql - Define the geometry type,No (internal helper),"Converts a 64-bit float to 8 little-endian bytes. Uses `float8send()` then reverses byte order.
+
+C0 5B F8 FC 7A E1 47 AE -> AE 47 E1 7A FC F8 5B C0",Internal Helper
 lm__int32_to_le_bytea(val integer),Section 1: CreateGeometryType.sql - Define the geometry type,No (internal helper),Converts a 32-bit integer to 4 little-endian bytes via bit shifting.,Internal Helper
 "geometry_overlaps_bbox(a geometry, b geometry)",Section 1: CreateGeometryType.sql - Define the geometry type,No (operator backing fn),Backing function for the `&&` operator. Tests AABB (Axis-Aligned Bounding Box) overlap.,Internal Helper
 "&& (OPERATOR: geometry, geometry)",Section 1: CreateGeometryType.sql - Define the geometry type,Yes,Bounding-box overlap. Returns true if AABBs intersect.,Supported
@@ -24,7 +28,7 @@ ST_Force_2D(p_geom geometry),Section 1: CreateGeometryType.sql - Define the geom
 ST_NDims(p_geom geometry),Section 1: CreateGeometryType.sql - Define the geometry type,Yes,Always returns 2. (stub),Stub
 "ST_GeomFromText(p_wkt text, p_srid integer)",Section 1: CreateGeometryType.sql - Define the geometry type,Yes,2-arg version. SRID accepted but ignored. Delegates to 1-arg version (defined later in Tier 2).,Shim
 "ST_GeomFromWKB(p_wkb bytea, p_srid integer)",Section 1: CreateGeometryType.sql - Define the geometry type,Yes,"Decodes OGC WKB binary back to geometry. Handles POINT, LINESTRING, POLYGON. Skips SRID bytes if present.",Partial
-ST_GeomFromWKB(p_wkb bytea),Section 1: CreateGeometryType.sql - Define the geometry type,Yes,"Decodes OGC WKB binary back to geometry. Handles POINT, LINESTRING, POLYGON. Skips SRID bytes if present.",Partial
+ST_GeomFromWKB(p_wkb bytea),Section 1: CreateGeometryType.sql - Define the geometry type,Yes,"Decodes OGC WKB binary back to geometry. Handles POINT, LINESTRING, POLYGON.",Partial
 "lm__le_bytea_to_float8(p_wkb bytea, p_offset integer)",Section 1: CreateGeometryType.sql - Define the geometry type,No (internal helper),Reads 8 little-endian bytes from a bytea at the given offset and returns a float8. Reverses bytes then calls `float8recv()`. reverse a WKB and make it float,Internal Helper
 "lm__le_bytea_to_int32(p_wkb bytea, p_offset integer)",Section 1: CreateGeometryType.sql - Define the geometry type,No (internal helper),Reads 4 little-endian bytes and returns an integer. So basically covert geoserver format to human readable,Internal Helper
 "ST_MakePoint(p_lon double precision, p_lat double precision, p_z double precision)",Section 1: CreateGeometryType.sql - Define the geometry type,Yes,3-arg version. Z is discarded (always 2D). (stub),Stub
