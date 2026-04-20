@@ -19,6 +19,7 @@ PG_BIN=/usr/pgsql-15/bin
 
 if [ ! -s "$DATA" ]; then
   echo "[rivers] generating $DATA"
+  mkdir -p "$(dirname "$DATA")"
   python3 "$ROOT/setup/gen_rivers.py" > "$DATA"
 fi
 echo "[rivers] dataset: $(wc -l < "$DATA") lines"
