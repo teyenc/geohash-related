@@ -9,16 +9,44 @@
 # ============================================================================
 set -euo pipefail
 
-BENCH_ROOT=${BENCH_ROOT:-/net/dev-server-te-yenchou/share/code/geohash-related/s2_vs_geohash_benchmark}
+BENCH_ROOT=${BENCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)}
 PG_BIN=/usr/pgsql-15/bin
 PG_DATA=$BENCH_ROOT/pg_data
-PG_PORT=54321
+PG_PORT=${PG_PORT:-54321}
 PG_LOG=$BENCH_ROOT/results/pg_server.log
 DATA_PIPE="/net/dev-server-te-yenchou/share/code/geospatial_v05/20 - sql/19_mapData.pipe"
 
 mkdir -p "$BENCH_ROOT/results"
 
-# ---- 1. initdb ----
+# ---- 0. clear any stale listener on the target port ----
+# If a previous run left a postmaster alive (or the user wiped pg_data while
+# the old postgres was still running), pg_ctl start would fail with
+# "Address already in use".  Stop our own cluster gracefully first, and if
+# something else still holds the port, kill whoever owns it.
+"$PG_BIN/pg_ctl" -D "$PG_DATA" -m fast stop 2>/dev/null || true
+
+# Returns the pid holding 127.0.0.1:$PG_PORT, or empty string if no one is.
+# Tolerant of both "nothing listens on this port" and missing `ss` output.
+port_holder_pid() {
+  local line
+  line=$(ss -tlnp 2>/dev/null | awk -v p=":$PG_PORT" '$4 ~ p"$" { print; exit }' ) || true
+  [ -n "$line" ] || { echo ""; return 0; }
+  echo "$line" | grep -oP 'pid=\K[0-9]+' | head -1 || true
+}
+pid=$(port_holder_pid)
+if [ -n "${pid:-}" ]; then
+  echo "[pg] clearing stale process on port $PG_PORT (pid=$pid)"
+  kill -9 "$pid" 2>/dev/null || true
+  sleep 2
+fi
+pid=$(port_holder_pid)
+if [ -n "${pid:-}" ]; then
+  echo "[pg] ERROR: port $PG_PORT is still bound by pid=$pid after cleanup attempt." >&2
+  echo "      Stop that process or set PG_PORT=<other> and re-run." >&2
+  exit 1
+fi
+
+# ---- 1. initdb (if a fresh data dir is needed) ----
 if [ ! -f "$PG_DATA/PG_VERSION" ]; then
   echo "[pg] initdb -> $PG_DATA"
   "$PG_BIN/initdb" -D "$PG_DATA" --encoding=UTF8 --locale=C -U "$USER" > /dev/null
@@ -33,10 +61,8 @@ if [ ! -f "$PG_DATA/PG_VERSION" ]; then
 fi
 
 # ---- 2. start ----
-if ! "$PG_BIN/pg_ctl" -D "$PG_DATA" status > /dev/null 2>&1; then
-  echo "[pg] starting on port $PG_PORT"
-  "$PG_BIN/pg_ctl" -D "$PG_DATA" -l "$PG_LOG" -w start
-fi
+echo "[pg] starting on port $PG_PORT"
+"$PG_BIN/pg_ctl" -D "$PG_DATA" -l "$PG_LOG" -w start
 
 # ---- 3. database + extension ----
 PSQL=( "$PG_BIN/psql" -h 127.0.0.1 -p $PG_PORT -U "$USER" -v ON_ERROR_STOP=1 -X )
