@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geohash Polygon Query Pipeline</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0c0e1a;
+            --panel: #151827;
+            --border: #252a3a;
+            --text: #c8cdd8;
+            --dim: #5a6178;
+            --accent1: #f43f5e;
+            --accent2: #fbbf24;
+            --accent3: #38bdf8;
+            --accent4: #22d3ee;
+            --accent5: #10b981;
+            --accent6: #a78bfa;
+            --accent7: #f97316;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Sans', sans-serif;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 960px;
+        }
+        h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--accent2), var(--accent4));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle { color: var(--dim); margin-bottom: 30px; font-size: 14px; }
+        .pipeline { display: flex; flex-direction: column; gap: 0; width: 100%; max-width: 900px; }
+        .step { display: flex; align-items: stretch; }
+        .step-marker { display: flex; flex-direction: column; align-items: center; width: 60px; flex-shrink: 0; }
+        .step-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; color: var(--bg); flex-shrink: 0; }
+        .step-line { width: 3px; flex-grow: 1; min-height: 10px; }
+        .step-content { flex-grow: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin: 6px 0 6px 12px; }
+        .step-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+        .step-detail { font-size: 13px; color: var(--dim); line-height: 1.6; }
+        code { font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: #e2e8f0; }
+        .code-block { font-family: 'JetBrains Mono', monospace; font-size: 11px; background: #0c0e1a; border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin-top: 8px; line-height: 1.7; overflow-x: auto; white-space: pre; }
+        .highlight-rose { color: var(--accent1); }
+        .highlight-amber { color: var(--accent2); }
+        .highlight-sky { color: var(--accent3); }
+        .highlight-cyan { color: var(--accent4); }
+        .highlight-emerald { color: var(--accent5); }
+        .highlight-violet { color: var(--accent6); }
+        .highlight-orange { color: var(--accent7); }
+        .map-canvas { margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: #0c0e1a; }
+    </style>
+</head>
+<body>
+    <h1>Geohash Polygon Query Pipeline</h1>
+    <p class="subtitle">"Find all 7-Elevens inside this polygon" — from API call to final result</p>
+
+    <div class="pipeline">
+        <!-- Step 1 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent2);">1</div>
+                <div class="step-line" style="background: linear-gradient(var(--accent2), var(--accent3));"></div>
+            </div>
+            <div class="step-content">
+                <div class="step-title"><span class="highlight-amber">User Draws a Polygon on the Map</span></div>
+                <div class="step-detail">
+                    The user draws an irregular polygon on the map. The frontend sends the polygon vertices to GeoServer.
+                    <canvas id="canvasStep1" class="map-canvas" width="400" height="180"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent3);">2</div>
+                <div class="step-line" style="background: linear-gradient(var(--accent3), var(--accent4));"></div>
+            </div>
+            <div class="step-content">
+                <div class="step-title"><span class="highlight-sky">Compute Bounding Box</span></div>
+                <div class="step-detail">
+                    Loop through all vertices. Track the smallest and largest lon/lat values. The bbox is the rectangle that fully encloses the polygon.
+                    <canvas id="canvasStep2" class="map-canvas" width="400" height="180"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent4);">3</div>
+                <div class="step-line" style="background: linear-gradient(var(--accent4), var(--accent4));"></div>
+            </div>
+            <div class="step-content">
+                <div class="step-title"><span class="highlight-cyan">Pick Geohash Precision from Bbox Size</span></div>
+                <div class="step-detail">
+                    Measure the bbox span in miles. Pick precision to match available indexes.
+                    <div class="code-block">lat_span = 5.52 miles,  lon_span = 3.66 miles → max = <span class="highlight-cyan">5.52 miles</span>
+
+5.52 > 20?  <span class="highlight-rose">No</span>   (skip precision 5)
+5.52 > 1?   <span class="highlight-emerald">Yes</span>  → <span class="highlight-cyan">Precision 6</span>  (cell ≈ 0.61 miles, uses ix_mapdata4)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent4);">4</div>
+                <div class="step-line" style="background: linear-gradient(var(--accent4), var(--accent5));"></div>
+            </div>
+            <div class="step-content">
+                <div class="step-title"><span class="highlight-cyan">Walk the Geohash Grid (SW → NE)</span></div>
+                <div class="step-detail">
+                    Encode the SW corner to get the starting cell. Walk East and North until the bbox is fully covered. Result: ~35 geohash-6 cells.
+                    <canvas id="canvasStep4" class="map-canvas" width="400" height="180"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 5 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent5);">5</div>
+                <div class="step-line" style="background: linear-gradient(var(--accent5), var(--accent6));"></div>
+            </div>
+            <div class="step-content">
+                <div class="step-title"><span class="highlight-emerald">DocDB Index Scan (B-Tree on geohash prefix)</span></div>
+                <div class="step-detail">
+                    YSQL sends ~35 exact-match lookups to DocDB. The <code>md_name = '7-Eleven'</code> filter is pushed down to the storage layer.
+                    <div class="code-block"><span class="highlight-emerald">WHERE LEFT(geo_hash10, 6) IN ('9x1y8k','9x1y8m', ... ~35 cells ...)</span>
+  <span class="highlight-emerald">AND md_name = '7-Eleven'</span>
+
+→ Returns <span class="highlight-emerald">18 candidate rows</span> (7-Elevens in the bbox area)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 6 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent6);">6</div>
+                <div class="step-line" style="background: linear-gradient(var(--accent6), var(--accent7));"></div>
+            </div>
+            <div class="step-content">
+                <div class="step-title"><span class="highlight-violet">Polygon Filter (Ray-Casting Point-in-Polygon)</span></div>
+                <div class="step-detail">
+                    For each candidate row, cast a ray eastward and count polygon edge crossings. <strong>Odd = inside. Even = outside.</strong> Removes false positives from bbox corners.
+                    <canvas id="canvasStep6" class="map-canvas" width="400" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 7 -->
+        <div class="step">
+            <div class="step-marker">
+                <div class="step-dot" style="background: var(--accent7);">7</div>
+                <div class="step-line" style="background: transparent;"></div>
+            </div>
+            <div class="step-content" style="border-color: var(--accent7);">
+                <div class="step-title"><span class="highlight-orange">Final Result → 14 rows</span></div>
+                <div class="step-detail">
+                    18 candidates → 4 discarded (bbox corners outside polygon) → <span class="highlight-orange">14 7-Elevens</span> truly inside the polygon returned to the application.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const polyVertices = [
+            { lon: -111.95, lat: 40.72 }, { lon: -111.88, lat: 40.72 },
+            { lon: -111.88, lat: 40.78 }, { lon: -111.92, lat: 40.80 },
+            { lon: -111.95, lat: 40.78 },
+        ];
+        const bboxW = -111.96, bboxE = -111.87, bboxS = 40.71, bboxN = 40.81;
+        function lonToX(lon, w) { return ((lon - bboxW) / (bboxE - bboxW)) * w; }
+        function latToY(lat, h) { return h - ((lat - bboxS) / (bboxN - bboxS)) * h; }
+
+        function drawPolygon(ctx, w, h, opts = {}) {
+            ctx.beginPath();
+            ctx.moveTo(lonToX(polyVertices[0].lon, w), latToY(polyVertices[0].lat, h));
+            for (let i = 1; i < polyVertices.length; i++)
+                ctx.lineTo(lonToX(polyVertices[i].lon, w), latToY(polyVertices[i].lat, h));
+            ctx.closePath();
+            ctx.fillStyle = opts.fill || 'rgba(251, 191, 36, 0.15)';
+            ctx.fill();
+            ctx.strokeStyle = opts.stroke || '#fbbf24';
+            ctx.lineWidth = opts.lineWidth || 2;
+            if (opts.dash) ctx.setLineDash(opts.dash);
+            ctx.stroke(); ctx.setLineDash([]);
+            if (opts.dots !== false) {
+                ctx.fillStyle = '#fbbf24';
+                polyVertices.forEach(v => { ctx.beginPath(); ctx.arc(lonToX(v.lon, w), latToY(v.lat, h), 4, 0, Math.PI*2); ctx.fill(); });
+            }
+        }
+        function drawBBox(ctx, w, h) {
+            const x1 = lonToX(-111.95, w), x2 = lonToX(-111.88, w);
+            const y1 = latToY(40.80, h), y2 = latToY(40.72, h);
+            ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+            ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+            ctx.fillStyle = 'rgba(56,189,248,0.08)';
+            ctx.fillRect(x1, y1, x2-x1, y2-y1);
+        }
+
+        // Step 1
+        (function() {
+            const c = document.getElementById('canvasStep1'), ctx = c.getContext('2d');
+            drawPolygon(ctx, c.width, c.height, { dash: [6,4] });
+            ctx.fillStyle = '#5a6178'; ctx.font = '11px JetBrains Mono';
+            ctx.fillText('User-drawn polygon', 10, 15);
+        })();
+
+        // Step 2
+        (function() {
+            const c = document.getElementById('canvasStep2'), ctx = c.getContext('2d');
+            drawPolygon(ctx, c.width, c.height, { dash: [6,4] });
+            drawBBox(ctx, c.width, c.height);
+            ctx.fillStyle = '#5a6178'; ctx.font = '11px JetBrains Mono';
+            ctx.fillText('Yellow = polygon    Blue = bounding box', 10, 15);
+        })();
+
+        // Step 4: grid
+        (function() {
+            const c = document.getElementById('canvasStep4'), ctx = c.getContext('2d');
+            const w = c.width, h = c.height;
+            const cellLon = 0.01, cellLat = 0.005;
+            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 0.5;
+            for (let lon = -111.96; lon <= -111.87; lon += cellLon) { const x = lonToX(lon,w); ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+            for (let lat = 40.71; lat <= 40.81; lat += cellLat) { const y = latToY(lat,h); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+            for (let lat = 40.72; lat < 40.80; lat += cellLat) {
+                for (let lon = -111.95; lon < -111.88; lon += cellLon) {
+                    const x = lonToX(lon,w), y = latToY(lat+cellLat,h);
+                    const cw = lonToX(lon+cellLon,w)-x, ch = latToY(lat,h)-y;
+                    ctx.fillStyle = 'rgba(34,211,238,0.2)'; ctx.strokeStyle = '#22d3ee'; ctx.lineWidth = 1;
+                    ctx.fillRect(x,y,cw,ch); ctx.strokeRect(x,y,cw,ch);
+                }
+            }
+            drawPolygon(ctx, w, h, { dash: [6,4], fill: 'transparent' });
+            drawBBox(ctx, w, h);
+            ctx.fillStyle = '#5a6178'; ctx.font = '11px JetBrains Mono';
+            ctx.fillText('Cyan cells = geohash-6 grid covering the bbox', 10, 15);
+        })();
+
+        // Step 6: points
+        (function() {
+            const c = document.getElementById('canvasStep6'), ctx = c.getContext('2d');
+            const w = c.width, h = c.height;
+            drawBBox(ctx, w, h);
+            drawPolygon(ctx, w, h, { dash: [6,4] });
+            const insidePts = [
+                {lon:-111.93,lat:40.74},{lon:-111.91,lat:40.73},{lon:-111.90,lat:40.75},
+                {lon:-111.92,lat:40.76},{lon:-111.94,lat:40.75},{lon:-111.91,lat:40.77},
+                {lon:-111.93,lat:40.78},{lon:-111.90,lat:40.74},{lon:-111.92,lat:40.73},
+                {lon:-111.89,lat:40.75},{lon:-111.93,lat:40.76},{lon:-111.91,lat:40.74},
+                {lon:-111.94,lat:40.74},{lon:-111.92,lat:40.77},
+            ];
+            const outsidePts = [
+                {lon:-111.945,lat:40.795},{lon:-111.885,lat:40.795},
+                {lon:-111.885,lat:40.725},{lon:-111.945,lat:40.725},
+            ];
+            insidePts.forEach(p => { ctx.beginPath(); ctx.arc(lonToX(p.lon,w),latToY(p.lat,h),5,0,Math.PI*2); ctx.fillStyle='#10b981'; ctx.fill(); ctx.strokeStyle='#065f46'; ctx.lineWidth=1; ctx.stroke(); });
+            outsidePts.forEach(p => {
+                const x=lonToX(p.lon,w), y=latToY(p.lat,h);
+                ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fillStyle='rgba(239,68,68,0.4)'; ctx.fill(); ctx.strokeStyle='#ef4444'; ctx.lineWidth=2; ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(w,y); ctx.strokeStyle='rgba(239,68,68,0.3)'; ctx.lineWidth=1; ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]);
+            });
+            ctx.fillStyle = '#5a6178'; ctx.font = '10px JetBrains Mono';
+            ctx.fillText('Green = inside (odd crossings)  Red = outside (even crossings)', 10, 15);
+        })();
+    </script>
+</body>
+</html>

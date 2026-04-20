@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>B+ Tree Mixed Levels (S2 range-scan)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root {
+      --bg: #1e1e24;
+      --text: #e0e0e0;
+      --highlight: #81c784;
+      --highlight-soft: rgba(129, 199, 132, 0.3);
+      --node-bg: #2a2a30;
+      --node-border: #444;
+      --grid-major: #555;
+      --grid-minor: #333;
+      --geom-lake: rgba(79, 195, 247, 0.6);
+      --geom-road: #ffb74d;
+      --geom-point: #e57373;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 { margin-top: 0; font-weight: 600; letter-spacing: -0.5px; }
+    .description {
+      max-width: 900px;
+      text-align: left;
+      margin-bottom: 20px;
+      line-height: 1.5;
+      color: #ccc;
+    }
+    .layout {
+      display: flex;
+      flex-direction: row;
+      gap: 40px;
+      align-items: flex-start;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .panel {
+      background: #25252b;
+      border: 1px solid var(--node-border);
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .panel h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+      color: #eee;
+      margin-bottom: 15px;
+    }
+    /* Grid */
+    .cell-l1 { fill: transparent; stroke: var(--grid-major); stroke-width: 2; pointer-events: none; }
+    .cell-l2 { fill: transparent; stroke: var(--grid-minor); stroke-width: 1; pointer-events: none; }
+    .cell-text-l1 { fill: #fff; font-weight: bold; font-family: monospace; font-size: 16px; opacity: 0.2; }
+    .cell-text-l2 { fill: #888; font-family: monospace; font-size: 12px; }
+    
+    /* Geometries */
+    .lake { fill: var(--geom-lake); stroke: #29b6f6; stroke-width: 2; }
+    .road { fill: none; stroke: var(--geom-road); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+    .point { fill: var(--geom-point); }
+
+    /* B+ Tree */
+    .btree-node { fill: var(--node-bg); stroke: var(--node-border); stroke-width: 2; transition: all 0.3s; }
+    .btree-node.active { stroke: var(--highlight); fill: #2c3e30; }
+    .btree-text { fill: #ccc; font-family: monospace; font-size: 14px; text-anchor: middle; dominant-baseline: central; }
+    .btree-link { fill: none; stroke: #555; stroke-width: 2; transition: stroke 0.3s; }
+    .btree-link.active { stroke: var(--highlight); stroke-width: 3; }
+    .leaf-pointer { fill: none; stroke: #888; stroke-width: 2; stroke-dasharray: 4; }
+    
+    .query-box-viz { fill: var(--highlight-soft); stroke: var(--highlight); stroke-width: 3; stroke-dasharray: 6; pointer-events: none; }
+
+    .query-info {
+      margin-top: 20px;
+      background: #1a1a20;
+      border: 1px solid #444;
+      padding: 15px 25px;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 900px;
+    }
+    .query-info code { color: #569cd6; font-size: 1.1rem; display: block; margin-top: 10px; background: #0d0d12; padding: 10px; border-radius: 4px; }
+    .query-info .highlight { color: var(--highlight); font-weight: bold; }
+    .query-info .parent-highlight { color: #ce9178; font-weight: bold; }
+    
+    .btn-group { margin-top: 15px; display: flex; gap: 10px; justify-content: center; }
+    button {
+      background: #444; color: white; border: none; padding: 10px 20px;
+      border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.95rem;
+    }
+    button:hover { background: #555; }
+    button.active { background: var(--highlight); color: #000; }
+  </style>
+</head>
+<body>
+
+  <h1>S2 S2 Magic: Mixing Massive and Tiny Cells</h1>
+  
+  <div class="description">
+    <p>To avoid massive write bloat for lines and polygons, Google Spanner allows inserting a mix of cell sizes. In this 8-bit example:</p>
+    <ul>
+      <li><strong>Level 1 cells</strong> cover large 2x2 areas. Their IDs are 32, 96, 160, 224.</li>
+      <li><strong>Level 2 cells</strong> cover small 1x1 areas. Their IDs sit <i>inside</i> the numeric range of their parents.</li>
+    </ul>
+    <p>We inserted 3 geometries: A massive <strong>Lake</strong> (represented by one Level 1 cell: <code>224</code>), a <strong>Road</strong> (represented by three Level 2 cells: <code>8, 24, 40</code>), and a <strong>Point</strong> (one Level 2 cell: <code>72</code>).</p>
+  </div>
+
+  <div class="btn-group">
+    <button onclick="runQuery('descendant')" id="btn-q1">Query A: Scan over Road (Descendant Search)</button>
+    <button onclick="runQuery('ancestor')" id="btn-q2">Query B: Point inside Lake (Ancestor Search)</button>
+    <button onclick="runQuery('clear')" id="btn-clear">Clear</button>
+  </div>
+
+  <div class="layout">
+    <!-- 2D Grid Panel -->
+    <div class="panel">
+      <h2>1. The Map (Mixed Resolution)</h2>
+      <svg id="grid-svg" width="320" height="320"></svg>
+    </div>
+
+    <!-- B+ Tree Panel -->
+    <div class="panel">
+      <h2>2. The B+ Tree Index</h2>
+      <svg id="btree-svg" width="500" height="320"></svg>
+    </div>
+  </div>
+
+  <div class="query-info" id="query-display">
+    Click a query button above to see how S2 handles mixed resolutions.
+  </div>
+
+  <script>
+    // --- 1. Grid Definition ---
+    const SIZE = 320;
+    const L1_SIZE = SIZE / 2;
+    const L2_SIZE = SIZE / 4;
+
+    const l1_cells = [
+      { id: 32, x: 0, y: 0, min: 1, max: 63, label: "L1: 32" },
+      { id: 224, x: 1, y: 0, min: 193, max: 255, label: "L1: 224" },
+      { id: 96, x: 0, y: 1, min: 65, max: 127, label: "L1: 96" },
+      { id: 160, x: 1, y: 1, min: 129, max: 191, label: "L1: 160" }
+    ];
+
+    const l2_cells = [
+      // Top Left (children of 32)
+      { id: 8, x: 0, y: 0 }, { id: 24, x: 1, y: 0 },
+      { id: 56, x: 0, y: 1 }, { id: 40, x: 1, y: 1 },
+      // Top Right (children of 224)
+      { id: 200, x: 2, y: 0 }, { id: 216, x: 3, y: 0 },
+      { id: 248, x: 2, y: 1 }, { id: 232, x: 3, y: 1 },
+      // Bottom Left (children of 96)
+      { id: 72, x: 0, y: 2 }, { id: 88, x: 1, y: 2 },
+      { id: 120, x: 0, y: 3 }, { id: 104, x: 1, y: 3 },
+      // Bottom Right (children of 160)
+      { id: 184, x: 2, y: 2 }, { id: 168, x: 3, y: 2 },
+      { id: 136, x: 2, y: 3 }, { id: 152, x: 3, y: 3 }
+    ];
+
+    // --- 2. Draw Grid ---
+    const svgGrid = d3.select("#grid-svg");
+
+    // L2 grid & text
+    svgGrid.selectAll(".cell-l2")
+      .data(l2_cells).enter().append("rect").attr("class", "cell-l2")
+      .attr("x", d => d.x * L2_SIZE).attr("y", d => d.y * L2_SIZE)
+      .attr("width", L2_SIZE).attr("height", L2_SIZE);
+    
+    svgGrid.selectAll(".cell-text-l2")
+      .data(l2_cells).enter().append("text").attr("class", "cell-text-l2")
+      .attr("x", d => d.x * L2_SIZE + 5).attr("y", d => d.y * L2_SIZE + 15)
+      .text(d => d.id);
+
+    // L1 grid & text
+    svgGrid.selectAll(".cell-l1")
+      .data(l1_cells).enter().append("rect").attr("class", "cell-l1")
+      .attr("x", d => d.x * L1_SIZE).attr("y", d => d.y * L1_SIZE)
+      .attr("width", L1_SIZE).attr("height", L1_SIZE);
+      
+    svgGrid.selectAll(".cell-text-l1")
+      .data(l1_cells).enter().append("text").attr("class", "cell-text-l1")
+      .attr("x", d => d.x * L1_SIZE + L1_SIZE/2).attr("y", d => d.y * L1_SIZE + L1_SIZE/2)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "central")
+      .text(d => d.label);
+
+    // --- 3. Draw Geometries ---
+    // Lake (covers top right L1)
+    svgGrid.append("rect").attr("class", "lake")
+      .attr("x", 1 * L1_SIZE + 10).attr("y", 0 * L1_SIZE + 10)
+      .attr("width", L1_SIZE - 20).attr("height", L1_SIZE - 20)
+      .attr("rx", 8);
+
+    // Road (passes through L2: 8, 24, 40)
+    svgGrid.append("path").attr("class", "road")
+      .attr("d", `M 10,40 Q 60,10 100,40 T 140,110`);
+
+    // Point (inside L2: 72)
+    svgGrid.append("circle").attr("class", "point")
+      .attr("cx", 0 * L2_SIZE + 40).attr("cy", 2 * L2_SIZE + 40)
+      .attr("r", 8);
+
+    // Box to show query
+    const queryBox = svgGrid.append("rect").attr("class", "query-box-viz").attr("opacity", 0);
+
+
+    // --- 4. Draw B+ Tree ---
+    // Keys in DB: 8, 24, 40, 72, 224
+    const btreeNodes = [
+      { id: "root", level: 0, x: 250, y: 40, keys: [40, 100] },
+      { id: "int1", level: 1, x: 100, y: 130, keys: [40] },
+      { id: "int2", level: 1, x: 400, y: 130, keys: [100] },
+      { id: "leaf1", level: 2, x: 70, y: 240, keys: [8, 24] },
+      { id: "leaf2", level: 2, x: 250, y: 240, keys: [40, 72] },
+      { id: "leaf3", level: 2, x: 430, y: 240, keys: [224] }
+    ];
+
+    const btreeLinks = [
+      { source: "root", target: "int1", desc: "< 40" },
+      { source: "root", target: "int2", desc: ">= 40" },
+      { source: "int1", target: "leaf1", desc: "< 40" },
+      { source: "int2", target: "leaf2", desc: "< 100" },
+      { source: "int2", target: "leaf3", desc: ">= 100" }
+    ];
+
+    const svgBtree = d3.select("#btree-svg");
+
+    const linkPaths = svgBtree.selectAll(".btree-link")
+      .data(btreeLinks).enter().append("line").attr("class", "btree-link")
+      .attr("x1", d => btreeNodes.find(n => n.id === d.source).x)
+      .attr("y1", d => btreeNodes.find(n => n.id === d.source).y + 15)
+      .attr("x2", d => btreeNodes.find(n => n.id === d.target).x)
+      .attr("y2", d => btreeNodes.find(n => n.id === d.target).y - 15);
+
+    const nodeWidth = 100;
+    const nodeHeight = 30;
+
+    const nodeGroups = svgBtree.selectAll(".node-group")
+      .data(btreeNodes).enter().append("g")
+      .attr("transform", d => `translate(${d.x - nodeWidth/2}, ${d.y - nodeHeight/2})`);
+
+    const nodeRects = nodeGroups.append("rect").attr("class", "btree-node")
+      .attr("width", nodeWidth).attr("height", nodeHeight).attr("rx", 4);
+
+    nodeGroups.append("text").attr("class", "btree-text")
+      .attr("x", nodeWidth/2).attr("y", nodeHeight/2)
+      .text(d => d.keys.join(" | "));
+
+    const keyHighlightBoxes = svgBtree.append("g");
+
+    // --- 5. Interactions ---
+    function runQuery(type) {
+      document.querySelectorAll('.btn-group button').forEach(b => b.classList.remove('active'));
+      linkPaths.classed("active", false);
+      nodeRects.classed("active", false);
+      keyHighlightBoxes.selectAll("*").remove();
+
+      const qDisp = document.getElementById("query-display");
+
+      if (type === 'clear') {
+        queryBox.attr("opacity", 0);
+        qDisp.innerHTML = "Click a query button above to see how S2 handles mixed resolutions.";
+        return;
+      }
+
+      if (type === 'descendant') {
+        document.getElementById('btn-q1').classList.add('active');
+        
+        // Query Box over Top-Left quadrant (L1 Cell 32)
+        queryBox.attr("opacity", 1)
+          .attr("x", 0).attr("y", 0)
+          .attr("width", L1_SIZE).attr("height", L1_SIZE);
+
+        qDisp.innerHTML = `
+          <strong>1. The Query Box covers L1 Cell ID 32.</strong> Its numeric range is <code>[1, 63]</code>.<br><br>
+          <strong>2. S2 Descendant Search:</strong> Find all small geometries fully inside the box by scanning down the B+ Tree for that numeric range.
+          <code>SELECT * FROM table WHERE s2_cell <span class="highlight">BETWEEN 1 AND 63</span>;</code>
+          <span style="color:#aaa">Result: Finds the Road segments (8, 24, 40) in milliseconds.</span>
+        `;
+
+        // Highlight B+ tree
+        const activeNodes = ["root", "int1", "leaf1", "int2", "leaf2"];
+        nodeRects.filter(d => activeNodes.includes(d.id)).classed("active", true);
+        linkPaths.filter(d => ["leaf1", "leaf2", "int1", "int2"].includes(d.target)).classed("active", true);
+
+        // Highlight keys 8, 24, 40
+        highlightKey("leaf1", 0); // 8
+        highlightKey("leaf1", 1); // 24
+        highlightKey("leaf2", 0); // 40
+      }
+
+      if (type === 'ancestor') {
+        document.getElementById('btn-q2').classList.add('active');
+        
+        // Query Box tiny, inside Top-Right quadrant (inside L2 Cell 200)
+        queryBox.attr("opacity", 1)
+          .attr("x", 2 * L2_SIZE + 20).attr("y", 0 * L2_SIZE + 20)
+          .attr("width", 40).attr("height", 40);
+
+        qDisp.innerHTML = `
+          <strong>1. The Query Box is tiny.</strong> It converts to L2 Cell ID 200. Its range <code>[193, 207]</code> is completely empty in the index.<br><br>
+          <strong>2. S2 Ancestor Search:</strong> The database calculates the parent of 200 (which is 224) and checks if the parent exists!
+          <code>SELECT * FROM table WHERE s2_cell BETWEEN 193 AND 207 <br>
+          <span class="parent-highlight">OR s2_cell IN (224)</span>;</code>
+          <span style="color:#aaa">Result: The point lookup instantly finds the massive Lake (224) covering the query.</span>
+        `;
+
+        // Highlight B+ tree for point lookup 224
+        const activeNodes = ["root", "int2", "leaf3"];
+        nodeRects.filter(d => activeNodes.includes(d.id)).classed("active", true);
+        linkPaths.filter(d => d.target === "int2" || d.target === "leaf3").classed("active", true);
+
+        // Highlight key 224
+        highlightKey("leaf3", 0, "rgba(206, 145, 120, 0.4)", "#ce9178");
+      }
+    }
+
+    function highlightKey(leafId, keyIndex, bgColor="rgba(129, 199, 132, 0.4)", strokeColor="none") {
+      const node = btreeNodes.find(n => n.id === leafId);
+      const segment = nodeWidth / node.keys.length;
+      const kx = (node.x - nodeWidth/2) + (keyIndex * segment) + 2;
+      const ky = node.y - nodeHeight/2 + 2;
+      
+      keyHighlightBoxes.append("rect")
+        .attr("x", kx).attr("y", ky)
+        .attr("width", segment - 4).attr("height", nodeHeight - 4)
+        .attr("fill", bgColor)
+        .attr("stroke", strokeColor).attr("stroke-width", 2)
+        .attr("rx", 2);
+    }
+  </script>
+</body>
+</html>
