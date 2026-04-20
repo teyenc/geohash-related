@@ -3,3 +3,8 @@ __pycache__/
 *.pyo
 *.log
 geospatial_demo/data/19_mapData.pipe
+
+# Benchmark-local state (do not commit)
+s2_vs_geohash_benchmark/pg_data/
+s2_vs_geohash_benchmark/results/
+s2_vs_geohash_benchmark/data/
