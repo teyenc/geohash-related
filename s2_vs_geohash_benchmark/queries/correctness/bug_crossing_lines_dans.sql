@@ -1,0 +1,42 @@
+-- bug_crossing_lines_dans.sql
+-- ============================================================================
+-- CORRECTNESS DEMO: Two simple 2-vertex lines crossing in an X shape.
+--
+-- Same geometry as the PostGIS / S2 versions.  Dan's ST_Intersects
+-- CRASHES with an exception instead of returning a boolean.
+--
+-- Why it crashes:
+--   * Dan's ST_Intersects is defined in
+--       `20 - sql/25_GeometryFunctions.sql:294-347`
+--     and works by treating BOTH inputs as implicit polygons: it tests
+--     "any vertex of A inside B?" then "any vertex of B inside A?"
+--     using a shared point-in-polygon helper.
+--   * That helper (`point_in_polygon` in `20_GeohashFunctions.sql:481`)
+--     begins with a guard:
+--         IF array_length(p_lon, 1) < 3 OR
+--            array_length(p_lon, 1) <> array_length(p_lat, 1) THEN
+--            RAISE EXCEPTION 'point_in_polygon: polygon arrays
+--                             must be same length >= 3';
+--         END IF;
+--   * A 2-vertex LineString has length 2, so the guard always fires.
+--     The entire ST_Intersects call aborts with an exception instead
+--     of returning a boolean.
+--
+-- 2-vertex LineStrings are the most common spatial primitive in real-world
+-- GIS data (road segments, pipes, power lines, direct connectors, edges
+-- in a graph).  Dan's schema cannot answer "do these two things touch?"
+-- for any of them.
+--
+-- Expected (from PostGIS/S2):  t
+-- Actual   (from Dan's):       ERROR:  point_in_polygon: polygon arrays
+--                              must be same length >= 3
+--
+-- The bug disappears if you artificially add a 3rd vertex to each line
+-- (so point_in_polygon has a degenerate "triangle" to test against), but
+-- that is exactly the kind of data-laundering a user should not have to
+-- do just to run a basic intersection query.
+-- ============================================================================
+SELECT ST_Intersects(
+  ST_GeomFromText('LINESTRING(0 0, 10 10)'),
+  ST_GeomFromText('LINESTRING(0 10, 10 0)')
+) AS intersects;

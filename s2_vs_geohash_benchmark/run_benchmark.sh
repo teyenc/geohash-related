@@ -74,24 +74,24 @@ d_hits_q4=$(psql_yb bench_dans "SELECT count(*) FROM rivers WHERE ST_Intersects(
 # ---- Timings ----
 echo ""
 echo "[bench] running Q1 x $ITERS on 3 engines..."
-pg_t_q1=$(run_query pg bench_postgis  "$ROOT/queries/Q1_postgis.sql")
-d_t_q1=$( run_query yb bench_dans     "$ROOT/queries/Q1_dans.sql")
-s2_t_q1=$(run_query yb bench_s2       "$ROOT/queries/Q1_s2.sql")
+pg_t_q1=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q1_postgis.sql")
+d_t_q1=$( run_query yb bench_dans     "$ROOT/queries/performance/Q1_dans.sql")
+s2_t_q1=$(run_query yb bench_s2       "$ROOT/queries/performance/Q1_s2.sql")
 
 echo "[bench] running Q2 x $ITERS on 3 engines..."
-pg_t_q2=$(run_query pg bench_postgis  "$ROOT/queries/Q2_postgis.sql")
-d_t_q2=$( run_query yb bench_dans     "$ROOT/queries/Q2_dans.sql")
-s2_t_q2=$(run_query yb bench_s2       "$ROOT/queries/Q2_s2.sql")
+pg_t_q2=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q2_postgis.sql")
+d_t_q2=$( run_query yb bench_dans     "$ROOT/queries/performance/Q2_dans.sql")
+s2_t_q2=$(run_query yb bench_s2       "$ROOT/queries/performance/Q2_s2.sql")
 
 echo "[bench] running Q3 x $ITERS on 3 engines..."
-pg_t_q3=$(run_query pg bench_postgis  "$ROOT/queries/Q3_postgis.sql")
-d_t_q3=$( run_query yb bench_dans     "$ROOT/queries/Q3_dans.sql")
-s2_t_q3=$(run_query yb bench_s2       "$ROOT/queries/Q3_s2.sql")
+pg_t_q3=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q3_postgis.sql")
+d_t_q3=$( run_query yb bench_dans     "$ROOT/queries/performance/Q3_dans.sql")
+s2_t_q3=$(run_query yb bench_s2       "$ROOT/queries/performance/Q3_s2.sql")
 
 echo "[bench] running Q4 x $ITERS on 3 engines..."
-pg_t_q4=$(run_query pg bench_postgis  "$ROOT/queries/Q4_postgis.sql")
-d_t_q4=$( run_query yb bench_dans     "$ROOT/queries/Q4_dans.sql")
-s2_t_q4=$(run_query yb bench_s2       "$ROOT/queries/Q4_s2.sql")
+pg_t_q4=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q4_postgis.sql")
+d_t_q4=$( run_query yb bench_dans     "$ROOT/queries/performance/Q4_dans.sql")
+s2_t_q4=$(run_query yb bench_s2       "$ROOT/queries/performance/Q4_s2.sql")
 
 # ---- Output markdown ----
 cat > "$RESULTS/benchmark.md" <<EOF
