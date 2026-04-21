@@ -48,10 +48,10 @@
 7.11.1. Topological Relationships,ST_ContainsProperly — Tests if every point of B lies in the interior of A,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_CoveredBy — Tests if every point of A lies in B,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_Covers — Tests if every point of B lies in A,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
-7.11.1. Topological Relationships,ST_LineCrossingDirection — Returns a number indicating the crossing behavior of two LineStrings,No,,,3 - Not Supported by Geohash efficiently
-7.11.1. Topological Relationships,ST_OrderingEquals — Tests if two geometries represent the same geometry and have points in the same directional order,No,,,3 - Not Supported by Geohash efficiently
-7.11.1. Topological Relationships,"ST_Relate — Tests if two geometries have a topological relationship matching an Intersection Matrix pattern, or computes their Intersection Matrix",No,,,3 - Not Supported by Geohash efficiently
-7.11.1. Topological Relationships,ST_RelateMatch — Tests if a DE-9IM Intersection Matrix matches an Intersection Matrix pattern,No,,,3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_LineCrossingDirection — Returns a number indicating the crossing behavior of two LineStrings,No,,,2 - Supported by Geohash (C Library)
+7.11.1. Topological Relationships,ST_OrderingEquals — Tests if two geometries represent the same geometry and have points in the same directional order,No,,,2 - Supported by Geohash (C Library)
+7.11.1. Topological Relationships,"ST_Relate — Tests if two geometries have a topological relationship matching an Intersection Matrix pattern, or computes their Intersection Matrix",No,,,2 - Supported by Geohash (C Library)
+7.11.1. Topological Relationships,ST_RelateMatch — Tests if a DE-9IM Intersection Matrix matches an Intersection Matrix pattern,No,,,2 - Supported by Geohash (C Library)
 7.11.2. Distance Relationships,ST_3DDWithin — Tests if two 3D geometries are within a given 3D distance,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
 7.11.2. Distance Relationships,ST_3DDFullyWithin — Tests if two 3D geometries are entirely within a given 3D distance,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
 7.11.2. Distance Relationships,ST_DWithin — Tests if two geometries are within a given distance,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
@@ -83,7 +83,7 @@
 7.12. Measurement Functions,ST_MinimumClearanceLine — Returns the two-point LineString spanning a geometry's minimum clearance.,No,,,2 - Supported by Geohash (C Library)
 7.12. Measurement Functions,ST_Perimeter2D — Returns the 2D perimeter of a polygonal geometry. Alias for ST_Perimeter.,No,,,2 - Supported by Geohash (C Library)
 7.12. Measurement Functions,ST_ShortestLine — Returns the 2D shortest line between two geometries,No,,,2 - Supported by Geohash (C Library)
-7.13. Overlay Functions,ST_ClipByBox2D — Computes the portion of a geometry falling within a rectangle.,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.13. Overlay Functions,ST_ClipByBox2D — Computes the portion of a geometry falling within a rectangle.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.13. Overlay Functions,ST_Difference — Computes a geometry representing the part of geometry A that does not intersect geometry B.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.13. Overlay Functions,ST_Intersection — Computes a geometry representing the shared portion of geometries A and B.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.13. Overlay Functions,ST_SymDifference — Computes a geometry representing the portions of geometries A and B that do not intersect.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
@@ -149,7 +149,7 @@
 7.18. Bounding Box Functions,ST_MMin — Returns the M minima of a geometry.,No,Not 2D (3D/4D architectural gap),mmin,N/A (3D/4D)
 7.18. Bounding Box Functions,7.18. Bounding Box Functions,No,Not 2D (3D/4D architectural gap),mmax,N/A (3D/4D)
 7.18. Bounding Box Functions,Box2D — Returns a BOX2D representing the 2D extent of a geometry.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
-7.18. Bounding Box Functions,ST_EstimatedExtent — Returns the estimated extent of a spatial table.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
+7.18. Bounding Box Functions,ST_EstimatedExtent — Returns the estimated extent of a spatial table.,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.18. Bounding Box Functions,ST_Expand — Returns a bounding box expanded from another bounding box or a geometry.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.18. Bounding Box Functions,ST_Extent — Aggregate function that returns the bounding box of geometries.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.18. Bounding Box Functions,ST_XMax — Returns the X maxima of a 2D or 3D bounding box or a geometry.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
