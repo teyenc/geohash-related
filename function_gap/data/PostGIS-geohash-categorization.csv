@@ -5,19 +5,19 @@
 7.1. PostGIS Geometry/Geography/Box Data Types,geography — The type representing spatial features with geodetic (ellipsoidal) coordinate systems.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.1. PostGIS Geometry/Geography/Box Data Types,geometry_dump — A composite type used to describe the parts of complex geometry.,No,,,1 - Supported by Geohash (SQL)
 7.10. Operators,,,,,
-7.10.1. Bounding Box Operators,"&&(geometry,box2df) — Returns TRUE if a geometry's (cached) 2D bounding box intersects a 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"&&(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) intersects a geometry's (cached) 2D bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"&&(box2df,box2df) — Returns TRUE if two 2D float precision bounding boxes (BOX2DF) intersect each other.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
+7.10.1. Bounding Box Operators,"&&(geometry,box2df) — Returns TRUE if a geometry's (cached) 2D bounding box intersects a 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"&&(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) intersects a geometry's (cached) 2D bounding box.",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"&&(box2df,box2df) — Returns TRUE if two 2D float precision bounding boxes (BOX2DF) intersect each other.",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,"&&&(geometry,gidx) — Returns TRUE if a geometry's (cached) n-D bounding box intersects a n-D float precision bounding box (GIDX).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),N/A (3D/4D)
 7.10.1. Bounding Box Operators,"&&&(gidx,geometry) — Returns TRUE if a n-D float precision bounding box (GIDX) intersects a geometry's (cached) n-D bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),N/A (3D/4D)
 7.10.1. Bounding Box Operators,"&&&(gidx,gidx) — Returns TRUE if two n-D float precision bounding boxes (GIDX) intersect each other.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),N/A (3D/4D)
-7.10.1. Bounding Box Operators,"@(geometry,box2df) — Returns TRUE if a geometry's 2D bounding box is contained into a 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"@(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into a geometry's 2D bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"@(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into another 2D float precision bounding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"~(geometry,box2df) — Returns TRUE if a geometry's 2D bonding box contains a 2D float precision bounding box (GIDX).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"~(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains a geometry's 2D bonding box.",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,"~(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains another 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,GiST/BRIN index C-structs (YB uses LSM-trees + geohash),2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,&& — Returns TRUE if A's 2D bounding box intersects B's 2D bounding box.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
+7.10.1. Bounding Box Operators,"@(geometry,box2df) — Returns TRUE if a geometry's 2D bounding box is contained into a 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"@(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into a geometry's 2D bounding box.",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"@(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) is contained into another 2D float precision bounding box.",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"~(geometry,box2df) — Returns TRUE if a geometry's 2D bonding box contains a 2D float precision bounding box (GIDX).",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"~(box2df,geometry) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains a geometry's 2D bonding box.",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,"~(box2df,box2df) — Returns TRUE if a 2D float precision bounding box (BOX2DF) contains another 2D float precision bounding box (BOX2DF).",No,Architectural mismatch,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,&& — Returns TRUE if A's 2D bounding box intersects B's 2D bounding box.,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,&&& — Returns TRUE if A's n-D bounding box intersects B's n-D bounding box.,No,,,N/A (3D/4D)
 7.10.1. Bounding Box Operators,&< — Returns TRUE if A's bounding box overlaps or is to the left of B's.,No,,,3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,&<| — Returns TRUE if A's bounding box overlaps or is below B's.,No,,,3 - Not Supported by Geohash efficiently
@@ -26,36 +26,36 @@
 7.10.1. Bounding Box Operators,<<| — Returns TRUE if A's bounding box is strictly below B's.,No,,,3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,#ERROR!,,,,3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,>> — Returns TRUE if A's bounding box is strictly to the right of B's.,No,,,3 - Not Supported by Geohash efficiently
-7.10.1. Bounding Box Operators,@ — Returns TRUE if A's bounding box is contained by B's.,No,,,2 - Supported by Geohash (C Library)
+7.10.1. Bounding Box Operators,@ — Returns TRUE if A's bounding box is contained by B's.,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,|&> — Returns TRUE if A's bounding box overlaps or is above B's.,No,,,3 - Not Supported by Geohash efficiently
 7.10.1. Bounding Box Operators,|>> — Returns TRUE if A's bounding box is strictly above B's.,No,,,3 - Not Supported by Geohash efficiently
-7.10.1. Bounding Box Operators,~ — Returns TRUE if A's bounding box contains B's.,No,,,2 - Supported by Geohash (C Library)
-7.10.1. Bounding Box Operators,~= — Returns TRUE if A's bounding box is the same as B's.,No,,,2 - Supported by Geohash (C Library)
+7.10.1. Bounding Box Operators,~ — Returns TRUE if A's bounding box contains B's.,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.10.1. Bounding Box Operators,~= — Returns TRUE if A's bounding box is the same as B's.,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.10.2. Distance Operators,<-> — Returns the 2D distance between A and B.,Yes,Exist in Dan's code,Current yb_geospatial extension,3 - Not Supported by Geohash efficiently
 7.10.2. Distance Operators,|=| — Returns the distance between A and B trajectories at their closest point of approach.,No,,,3 - Not Supported by Geohash efficiently
 7.10.2. Distance Operators,<#> — Returns the 2D distance between A and B bounding boxes.,No,,,3 - Not Supported by Geohash efficiently
 7.10.2. Distance Operators,<<->> — Returns the n-D distance between the A and B geometries or bounding boxes,No,,,N/A (3D/4D)
 7.11. Spatial Relationships,,,,,
 7.11.1. Topological Relationships,"ST_3DIntersects — Tests if two geometries spatially intersect in 3D - only for points, linestrings, polygons, polyhedral surface (area)",No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
-7.11.1. Topological Relationships,"ST_Contains — Tests if every point of B lies in A, and their interiors have a point in common",Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,"ST_Crosses — Tests if two geometries have some, but not all, interior points in common",Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_Disjoint — Tests if two geometries have no points in common,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_Equals — Tests if two geometries include the same set of points,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_Intersects — Tests if two geometries intersect (they have at least one point in common),Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,"ST_Overlaps — Tests if two geometries have the same dimension and intersect, but each has at least one point not in the other",Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,"ST_Touches — Tests if two geometries have at least one point in common, but their interiors do not intersect",Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,"ST_Within — Tests if every point of A lies in B, and their interiors have a point in common",Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_ContainsProperly — Tests if every point of B lies in the interior of A,No,,,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_CoveredBy — Tests if every point of A lies in B,No,,,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_Covers — Tests if every point of B lies in A,No,,,2 - Supported by Geohash (C Library)
+7.11.1. Topological Relationships,"ST_Contains — Tests if every point of B lies in A, and their interiors have a point in common",Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,"ST_Crosses — Tests if two geometries have some, but not all, interior points in common",Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_Disjoint — Tests if two geometries have no points in common,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_Equals — Tests if two geometries include the same set of points,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_Intersects — Tests if two geometries intersect (they have at least one point in common),Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,"ST_Overlaps — Tests if two geometries have the same dimension and intersect, but each has at least one point not in the other",Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,"ST_Touches — Tests if two geometries have at least one point in common, but their interiors do not intersect",Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,"ST_Within — Tests if every point of A lies in B, and their interiors have a point in common",Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_ContainsProperly — Tests if every point of B lies in the interior of A,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_CoveredBy — Tests if every point of A lies in B,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_Covers — Tests if every point of B lies in A,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_LineCrossingDirection — Returns a number indicating the crossing behavior of two LineStrings,No,,,3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_OrderingEquals — Tests if two geometries represent the same geometry and have points in the same directional order,No,,,3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,"ST_Relate — Tests if two geometries have a topological relationship matching an Intersection Matrix pattern, or computes their Intersection Matrix",No,,,3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_RelateMatch — Tests if a DE-9IM Intersection Matrix matches an Intersection Matrix pattern,No,,,3 - Not Supported by Geohash efficiently
 7.11.2. Distance Relationships,ST_3DDWithin — Tests if two 3D geometries are within a given 3D distance,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
 7.11.2. Distance Relationships,ST_3DDFullyWithin — Tests if two 3D geometries are entirely within a given 3D distance,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
-7.11.2. Distance Relationships,ST_DWithin — Tests if two geometries are within a given distance,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
-7.11.2. Distance Relationships,ST_PointInsideCircle — Tests if a point geometry is inside a circle defined by a center and radius,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
+7.11.2. Distance Relationships,ST_DWithin — Tests if two geometries are within a given distance,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
+7.11.2. Distance Relationships,ST_PointInsideCircle — Tests if a point geometry is inside a circle defined by a center and radius,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.11.2. Distance Relationships,ST_DFullyWithin — Tests if a geometry is entirely inside a distance of another,No,,,3 - Not Supported by Geohash efficiently
 7.12. Measurement Functions,ST_3DClosestPoint — Returns the 3D point on g1 that is closest to g2. This is the first point of the 3D shortest line.,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
 7.12. Measurement Functions,ST_3DDistance — Returns the 3D cartesian minimum distance (based on spatial ref) between two geometries in projected units.,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
@@ -83,7 +83,7 @@
 7.12. Measurement Functions,ST_MinimumClearanceLine — Returns the two-point LineString spanning a geometry's minimum clearance.,No,,,2 - Supported by Geohash (C Library)
 7.12. Measurement Functions,ST_Perimeter2D — Returns the 2D perimeter of a polygonal geometry. Alias for ST_Perimeter.,No,,,2 - Supported by Geohash (C Library)
 7.12. Measurement Functions,ST_ShortestLine — Returns the 2D shortest line between two geometries,No,,,2 - Supported by Geohash (C Library)
-7.13. Overlay Functions,ST_ClipByBox2D — Computes the portion of a geometry falling within a rectangle.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
+7.13. Overlay Functions,ST_ClipByBox2D — Computes the portion of a geometry falling within a rectangle.,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.13. Overlay Functions,ST_Difference — Computes a geometry representing the part of geometry A that does not intersect geometry B.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.13. Overlay Functions,ST_Intersection — Computes a geometry representing the shared portion of geometries A and B.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.13. Overlay Functions,ST_SymDifference — Computes a geometry representing the portions of geometries A and B that do not intersect.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
@@ -206,7 +206,7 @@
 7.3. Geometry Constructors,"ST_PointM — Creates a Point with X, Y, M and SRID values.",No,Not 2D (3D/4D architectural gap),OGC M dimension,N/A (3D/4D)
 7.3. Geometry Constructors,"ST_PointZM — Creates a Point with X, Y, Z, M and SRID values.",No,Not 2D (3D/4D architectural gap),OGC ZM dimension,N/A (3D/4D)
 7.3. Geometry Constructors,ST_MakeEnvelope — Creates a rectangular Polygon from minimum and maximum coordinates.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
-7.3. Geometry Constructors,"ST_MakeLine — Creates a LineString from Point, MultiPoint, or LineString geometries.",Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
+7.3. Geometry Constructors,"ST_MakeLine — Creates a LineString from Point, MultiPoint, or LineString geometries.",Yes,Exist in Dan's code,Requires C library for complex math/validation,2 - Supported by Geohash (C Library)
 7.3. Geometry Constructors,"ST_MakePoint — Creates a 2D, 3DZ or 4D Point.",Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.3. Geometry Constructors,ST_MakePolygon — Creates a Polygon from a shell and optional list of holes.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.3. Geometry Constructors,ST_Collect — Creates a GeometryCollection or Multi* geometry from a set of geometries.,No,,,2 - Supported by Geohash (C Library)
@@ -275,15 +275,15 @@
 7.5. Geometry Editors,ST_AddPoint — Add a point to a LineString.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.5. Geometry Editors,ST_FlipCoordinates — Returns a version of a geometry with X and Y axis flipped.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.5. Geometry Editors,"ST_Force2D — Force the geometries into a ""2-dimensional mode"".",Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
-7.5. Geometry Editors,ST_ForcePolygonCCW — Orients all exterior rings counter-clockwise and all interior rings clockwise.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
-7.5. Geometry Editors,ST_ForcePolygonCW — Orients all exterior rings clockwise and all interior rings counter-clockwise.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
+7.5. Geometry Editors,ST_ForcePolygonCCW — Orients all exterior rings counter-clockwise and all interior rings clockwise.,Yes,Exist in Dan's code,Requires C library for complex math/validation,2 - Supported by Geohash (C Library)
+7.5. Geometry Editors,ST_ForcePolygonCW — Orients all exterior rings clockwise and all interior rings counter-clockwise.,Yes,Exist in Dan's code,Requires C library for complex math/validation,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,ST_Project — Returns a point projected from a start point by a distance and bearing (azimuth).,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,ST_RemovePoint — Remove a point from a linestring.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.5. Geometry Editors,ST_RemoveRepeatedPoints — Returns a version of a geometry with duplicate points removed.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,ST_Reverse — Return the geometry with vertex order reversed.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.5. Geometry Editors,ST_Segmentize — Returns a modified geometry/geography having no segment longer than a given distance.,Yes,Exist in Dan's code,Current yb_geospatial extension,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,ST_SetPoint — Replace point of a linestring with a given point.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
-7.5. Geometry Editors,ST_SnapToGrid — Snap all points of the input geometry to a regular grid.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
+7.5. Geometry Editors,ST_SnapToGrid — Snap all points of the input geometry to a regular grid.,Yes,Exist in Dan's code,Requires C library for complex math/validation,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,"ST_CollectionExtract — Given a geometry collection, returns a multi-geometry containing only elements of a specified type.",No,,,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,ST_CollectionHomogenize — Returns the simplest representation of a geometry collection.,No,,,2 - Supported by Geohash (C Library)
 7.5. Geometry Editors,ST_Scroll — Change start point of a closed LineString.,No,,,2 - Supported by Geohash (C Library)
