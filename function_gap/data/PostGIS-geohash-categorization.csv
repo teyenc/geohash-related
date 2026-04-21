@@ -48,10 +48,10 @@
 7.11.1. Topological Relationships,ST_ContainsProperly — Tests if every point of B lies in the interior of A,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_CoveredBy — Tests if every point of A lies in B,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
 7.11.1. Topological Relationships,ST_Covers — Tests if every point of B lies in A,No,,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
-7.11.1. Topological Relationships,ST_LineCrossingDirection — Returns a number indicating the crossing behavior of two LineStrings,No,,,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_OrderingEquals — Tests if two geometries represent the same geometry and have points in the same directional order,No,,,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,"ST_Relate — Tests if two geometries have a topological relationship matching an Intersection Matrix pattern, or computes their Intersection Matrix",No,,,2 - Supported by Geohash (C Library)
-7.11.1. Topological Relationships,ST_RelateMatch — Tests if a DE-9IM Intersection Matrix matches an Intersection Matrix pattern,No,,,2 - Supported by Geohash (C Library)
+7.11.1. Topological Relationships,ST_LineCrossingDirection — Returns a number indicating the crossing behavior of two LineStrings,No,,,3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_OrderingEquals — Tests if two geometries represent the same geometry and have points in the same directional order,No,,,3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,"ST_Relate — Tests if two geometries have a topological relationship matching an Intersection Matrix pattern, or computes their Intersection Matrix",No,,,3 - Not Supported by Geohash efficiently
+7.11.1. Topological Relationships,ST_RelateMatch — Tests if a DE-9IM Intersection Matrix matches an Intersection Matrix pattern,No,,,3 - Not Supported by Geohash efficiently
 7.11.2. Distance Relationships,ST_3DDWithin — Tests if two 3D geometries are within a given 3D distance,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
 7.11.2. Distance Relationships,ST_3DDFullyWithin — Tests if two 3D geometries are entirely within a given 3D distance,No,Not 2D (3D/4D architectural gap),3d,N/A (3D/4D)
 7.11.2. Distance Relationships,ST_DWithin — Tests if two geometries are within a given distance,Yes,Exist in Dan's code,Index structurally fails for lines/polygons (Seq Scan fallback),3 - Not Supported by Geohash efficiently
@@ -193,14 +193,14 @@
 7.21. Version Functions,PostGIS_GEOS_Version — Returns the version number of the GEOS library.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.21. Version Functions,PostGIS_Lib_Version — Returns the version number of the PostGIS library.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
 7.21. Version Functions,PostGIS_Version — Returns PostGIS version number and compile-time options.,Yes,Exist in Dan's code,Current yb_geospatial extension,1 - Supported by Geohash (SQL)
-7.22. Grand Unified Custom Variables (GUCs),"postgis.gdal_datapath — A configuration option to assign the value of GDAL's GDAL_DATA option. If not set, the environmentally set GDAL_DATA variable is used.",No,Blocked by C/C++ library,GDAL,1 - Supported by Geohash (SQL)
-7.22. Grand Unified Custom Variables (GUCs),postgis.gdal_enabled_drivers — A configuration option to set the enabled GDAL drivers in the PostGIS environment. Affects the GDAL configuration variable GDAL_SKIP.,No,Blocked by C/C++ library,GDAL,1 - Supported by Geohash (SQL)
-7.22. Grand Unified Custom Variables (GUCs),postgis.enable_outdb_rasters — A boolean configuration option to enable access to out-db raster bands.,No,Blocked by C/C++ library,GDAL,1 - Supported by Geohash (SQL)
-7.22. Grand Unified Custom Variables (GUCs),postgis.gdal_vsi_options — A string configuration to set options used when working with an out-db raster.,No,Blocked by C/C++ library,GDAL,1 - Supported by Geohash (SQL)
-7.22. Grand Unified Custom Variables (GUCs),postgis.gdal_cpl_debug — A boolean configuration to turn logging of GDAL debug messages on and off.,No,Blocked by C/C++ library,GDAL,1 - Supported by Geohash (SQL)
-7.23. Troubleshooting Functions,PostGIS_AddBBox — Add bounding box to the geometry.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report),1 - Supported by Geohash (SQL)
-7.23. Troubleshooting Functions,PostGIS_DropBBox — Drop the bounding box cache from the geometry.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report),1 - Supported by Geohash (SQL)
-7.23. Troubleshooting Functions,"PostGIS_HasBBox — Returns TRUE if the bbox of this geometry is cached, FALSE otherwise.",No,Architectural mismatch,PostGIS-specific version/config (no C binary to report),1 - Supported by Geohash (SQL)
+7.22. Grand Unified Custom Variables (GUCs),"postgis.gdal_datapath — A configuration option to assign the value of GDAL's GDAL_DATA option. If not set, the environmentally set GDAL_DATA variable is used.",No,Blocked by C/C++ library,GDAL,2 - Supported by Geohash (C Library)
+7.22. Grand Unified Custom Variables (GUCs),postgis.gdal_enabled_drivers — A configuration option to set the enabled GDAL drivers in the PostGIS environment. Affects the GDAL configuration variable GDAL_SKIP.,No,Blocked by C/C++ library,GDAL,2 - Supported by Geohash (C Library)
+7.22. Grand Unified Custom Variables (GUCs),postgis.enable_outdb_rasters — A boolean configuration option to enable access to out-db raster bands.,No,Blocked by C/C++ library,GDAL,2 - Supported by Geohash (C Library)
+7.22. Grand Unified Custom Variables (GUCs),postgis.gdal_vsi_options — A string configuration to set options used when working with an out-db raster.,No,Blocked by C/C++ library,GDAL,2 - Supported by Geohash (C Library)
+7.22. Grand Unified Custom Variables (GUCs),postgis.gdal_cpl_debug — A boolean configuration to turn logging of GDAL debug messages on and off.,No,Blocked by C/C++ library,GDAL,2 - Supported by Geohash (C Library)
+7.23. Troubleshooting Functions,PostGIS_AddBBox — Add bounding box to the geometry.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report),3 - Not Supported by Geohash efficiently
+7.23. Troubleshooting Functions,PostGIS_DropBBox — Drop the bounding box cache from the geometry.,No,Architectural mismatch,PostGIS-specific version/config (no C binary to report),3 - Not Supported by Geohash efficiently
+7.23. Troubleshooting Functions,"PostGIS_HasBBox — Returns TRUE if the bbox of this geometry is cached, FALSE otherwise.",No,Architectural mismatch,PostGIS-specific version/config (no C binary to report),3 - Not Supported by Geohash efficiently
 7.3. Geometry Constructors,"ST_MakePointM — Creates a Point from X, Y and M values.",No,Not 2D (3D/4D architectural gap),OGC M dimension,N/A (3D/4D)
 7.3. Geometry Constructors,"ST_PointZ — Creates a Point with X, Y, Z and SRID values.",No,Not 2D (3D/4D architectural gap),OGC Z dimension,N/A (3D/4D)
 7.3. Geometry Constructors,"ST_PointM — Creates a Point with X, Y, M and SRID values.",No,Not 2D (3D/4D architectural gap),OGC M dimension,N/A (3D/4D)
