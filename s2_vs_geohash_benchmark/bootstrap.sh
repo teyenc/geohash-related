@@ -136,6 +136,7 @@ if [ ! -x "$YB_ROOT/build/latest/postgres/bin/ysqlsh" ] \
    || [ ! -x "$YB_ROOT/build/latest/bin/yb-master" ]; then
   log "  running full yb_build.sh (this takes 20-40 min first time)..."
   cd "$YB_ROOT"
+  export YB_REMOTE_COMPILATION=0  # force local compile so it sees GEOS
   ./yb_build.sh release --skip-java --no-tests
 else
   log "  already built at $YB_ROOT/build/latest/"
@@ -151,8 +152,9 @@ YB_EXT_INSTALL=$YB_ROOT/build/latest/postgres/share/extension
 
 if [ ! -f "$YB_ROOT/build/latest/postgres/lib/yb_geospatial_s2.so" ] \
    || [ ! -f "$YB_EXT_INSTALL/yb_geospatial_s2--1.0.sql" ]; then
-  log "  compiling + installing extension..."
+  log "  compiling + installing extension (forcing local compile to see GEOS)..."
   [ -d "$YB_EXT_BUILD/yb_geospatial_s2" ] || die "extension source not found in YB build tree (was yb_build.sh skipped?)"
+  export YB_REMOTE_COMPILATION=0
   bash "$YB_EXT_BUILD/make.sh" -C "$YB_EXT_BUILD/yb_geospatial_s2"
   bash "$YB_EXT_BUILD/make.sh" -C "$YB_EXT_BUILD/yb_geospatial_s2" install
 else
