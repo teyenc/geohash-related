@@ -2,7 +2,7 @@
 # ==============================================================================
 # gen_rivers.py
 #
-# Generates 5,000 synthetic "rivers" (polylines) distributed across the
+# Generates 100,000 synthetic "rivers" (polylines) distributed across the
 # continental US.  Each river is a random walk of 15 segments, ~5 km each,
 # starting from a random location between (lon -125..-66, lat 24..49).
 #
@@ -17,7 +17,7 @@ import sys
 
 random.seed(42)
 
-N_RIVERS    = 5000
+N_RIVERS    = 100000
 VERTICES    = 15
 STEP_DEG    = 0.05   # ~5 km at mid-latitudes
 

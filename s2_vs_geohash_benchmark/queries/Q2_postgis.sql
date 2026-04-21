@@ -1,4 +1,4 @@
--- Q2_postgis.sql : COUNT of POIs within 10 km of Fort Collins, CO
+-- Q2_postgis.sql : COUNT of POIs within 50 km of Fort Collins, CO
 -- ----------------------------------------------------------------------------
 EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT TEXT)
 WITH anchor AS (
@@ -6,4 +6,4 @@ WITH anchor AS (
 )
 SELECT count(*) AS hits
   FROM my_mapdata, anchor
- WHERE ST_DWithin(geom::geography, anchor.pt::geography, 10000, true);
+ WHERE ST_DWithin(geom::geography, anchor.pt::geography, 50000, true);

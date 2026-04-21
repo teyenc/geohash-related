@@ -1,4 +1,5 @@
--- Q3_postgis.sql : COUNT of POIs inside a polygon covering the Denver metro
+-- Q3_postgis.sql : COUNT of POIs inside a 2.5 deg x 2.0 deg (~200 km x ~200 km)
+-- box centered on the Colorado Front Range.
 -- ----------------------------------------------------------------------------
 EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT TEXT)
 SELECT count(*) AS hits
@@ -6,5 +7,5 @@ SELECT count(*) AS hits
  WHERE ST_Intersects(
          geom,
          ST_GeomFromText(
-           'POLYGON((-105.20 39.60, -104.70 39.60, -104.70 40.00, -105.20 40.00, -105.20 39.60))',
+           'POLYGON((-106.20 38.80, -103.70 38.80, -103.70 40.80, -106.20 40.80, -106.20 38.80))',
            4326));

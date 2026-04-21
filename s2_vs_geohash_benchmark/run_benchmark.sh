@@ -51,21 +51,25 @@ run_query() {
 }
 
 # ---- Correctness: hit counts (ignoring order) ----
-pg_hits_q1=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 1000, true);")
-pg_hits_q2=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 10000, true);")
-pg_hits_q3=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_Intersects(geom, ST_MakeEnvelope(-105.20, 39.60, -104.70, 40.00, 4326));")
-pg_hits_q4=$(psql_pg bench_postgis "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakeEnvelope(-124.4, 32.5, -114.1, 42.0, 4326));")
+# Q1:   5 km radius around Fort Collins,   padded bbox (-105.15, 40.52)  -> (-105.00, 40.65)
+# Q2:  50 km radius around Fort Collins,   padded bbox (-105.68, 40.08)  -> (-104.48, 41.08)
+# Q3: 200 km Colorado Front Range box,            bbox (-106.20, 38.80)  -> (-103.70, 40.80)
+# Q4: western-US envelope (~5x CA area),          bbox (-125.00, 30.00)  -> (-100.00, 50.00)
+pg_hits_q1=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 5000, true);")
+pg_hits_q2=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 50000, true);")
+pg_hits_q3=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
+pg_hits_q4=$(psql_pg bench_postgis "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
 
-s2_hits_q1=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.0925, 40.5703, -105.0625, 40.6003, 4326))) AND ST_DistanceSphere(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 1000;")
-s2_hits_q2=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.20, 40.47, -104.95, 40.70, 4326))) AND ST_DistanceSphere(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 10000;")
-s2_hits_q3=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.20, 39.60, -104.70, 40.00, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-105.20, 39.60, -104.70, 40.00, 4326));")
-s2_hits_q4=$(psql_yb bench_s2 "SELECT count(*) FROM rivers WHERE id IN (SELECT spatial_candidates('rivers', ST_MakeEnvelope(-124.4, 32.5, -114.1, 42.0, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-124.4, 32.5, -114.1, 42.0, 4326));")
+s2_hits_q1=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.15, 40.52, -105.00, 40.65, 4326))) AND ST_DistanceSphere(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 5000;")
+s2_hits_q2=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))) AND ST_DistanceSphere(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;")
+s2_hits_q3=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
+s2_hits_q4=$(psql_yb bench_s2 "SELECT count(*) FROM rivers WHERE id IN (SELECT spatial_candidates('rivers', ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
 
 # Dan's hit counts (hardcoded per the queries' structure)
-d_hits_q1=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.0892, 40.5763, -105.0658, 40.5943, 6) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 6) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 1000, true);")
-d_hits_q2=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.20, 40.47, -104.95, 40.70, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 10000, true);")
-d_hits_q3=$(psql_yb bench_dans "WITH covering AS (SELECT * FROM geohash_cells_for_bbox(-105.20, 39.60, -104.70, 40.00) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM covering)) AND ST_Intersects(geom, ST_MakePolygon(ARRAY[-105.20, -104.70, -104.70, -105.20, -105.20], ARRAY[39.60,  39.60,  40.00,  40.00,  39.60]));")
-d_hits_q4=$(psql_yb bench_dans "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakePolygon(ARRAY[-124.4, -114.1, -114.1, -124.4, -124.4], ARRAY[32.5, 32.5, 42.0, 42.0, 32.5]));")
+d_hits_q1=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.15, 40.52, -105.00, 40.65, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 5000, true);")
+d_hits_q2=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.68, 40.08, -104.48, 41.08, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 50000, true);")
+d_hits_q3=$(psql_yb bench_dans "WITH covering AS (SELECT * FROM geohash_cells_for_bbox(-106.20, 38.80, -103.70, 40.80, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM covering)) AND ST_Intersects(geom, ST_MakePolygon(ARRAY[-106.20, -103.70, -103.70, -106.20, -106.20], ARRAY[38.80, 38.80, 40.80, 40.80, 38.80]));")
+d_hits_q4=$(psql_yb bench_dans "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakePolygon(ARRAY[-125.0, -100.0, -100.0, -125.0, -125.0], ARRAY[30.0, 30.0, 50.0, 50.0, 30.0]));")
 
 # ---- Timings ----
 echo ""
@@ -101,10 +105,10 @@ Timings: median of 5 runs (1 warmup discarded), in milliseconds
 
 | Query | Description | PostGIS | S2 (ours) | Dan's (geohash) |
 |-------|-------------|--------:|----------:|----------------:|
-| Q1 | Points within **1 km** of Fort Collins | $pg_hits_q1 | $s2_hits_q1 | $d_hits_q1 |
-| Q2 | Points within **10 km** of Fort Collins | $pg_hits_q2 | $s2_hits_q2 | $d_hits_q2 |
-| Q3 | Points inside Denver-metro box (~40 km) | $pg_hits_q3 | $s2_hits_q3 | $d_hits_q3 |
-| Q4 | **Rivers** intersecting California envelope (5,000 LineStrings) | $pg_hits_q4 | $s2_hits_q4 | $d_hits_q4 |
+| Q1 | Points within **5 km** of Fort Collins | $pg_hits_q1 | $s2_hits_q1 | $d_hits_q1 |
+| Q2 | Points within **50 km** of Fort Collins | $pg_hits_q2 | $s2_hits_q2 | $d_hits_q2 |
+| Q3 | Points inside **~200 km** Colorado Front Range box | $pg_hits_q3 | $s2_hits_q3 | $d_hits_q3 |
+| Q4 | **Rivers** intersecting western-US envelope (100,000 LineStrings) | $pg_hits_q4 | $s2_hits_q4 | $d_hits_q4 |
 
 ## Latency (median ms)
 

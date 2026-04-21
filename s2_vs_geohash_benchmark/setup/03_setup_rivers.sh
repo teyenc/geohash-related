@@ -2,7 +2,7 @@
 # ==============================================================================
 # 03_setup_rivers.sh
 #
-# Loads 5,000 synthetic rivers (LineStrings) into all three benchmark DBs:
+# Loads 100,000 synthetic rivers (LineStrings) into all three benchmark DBs:
 #   - bench_postgis : rivers(id, name, geom geometry(LineString, 4326)) + GiST
 #   - bench_dans    : rivers(id, name, geom geometry)           -- Dan's (lon[],lat[])
 #                                                               -- NO INDEX (by design;
