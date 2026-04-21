@@ -18,43 +18,56 @@
 --
 -- QUERY TIME:
 --
---   1)  ST_S2Covering(western_us_envelope, 10, 20) returns 1 383 int8
---       cells.  The S2 coverer emits fine cells and then
---       S2CellUnion::Normalize() merges 4 same-level siblings into
---       their parent wherever possible, so the final covering uses
---       mixed levels adapted to the envelope's shape:
+-- Step 1  -- get the S2 covering of the query envelope:
 --
---           level  3 (~1 250 km):    1 cell    <- most of the interior
---           level  4 (~500 km):      6
---           level  5 (~250 km):      9
---           level  6 (~125 km):     21
---           level  7 (~66 km):      57
---           level  8 (~33 km):     182
---           level  9 (~16 km):     362
---           level 10 ( ~8 km):     626         <- edge-hugging cells
---           level 11 ( ~4 km):      60
---           level 12+  (~2 km or finer):   59
+--     SELECT unnest(ST_S2Covering(
+--              ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326),
+--              10, 20));    -- min_level=10, max_level=20
+--     --  -> 1 383 int8 cells:
+--     --     5968434988591349760, 5968443784684371968, ...,
+--     --     6015767864655478784, 6015769032886583296
 --
---       A 5.5 M km^2 envelope genuinely needs ~1 400 Hilbert-curve
---       intervals to tile without padding - even with mixed levels.
---       A handful of representative cell IDs:
+-- Step 2  -- Normalize() in the coverer distributes those cells across
+-- mixed levels to match the envelope's shape without padding:
 --
---           5968434988591349760   5968443784684371968   5968452580777394176
---                                             ...
---           6015540282928398336   6015767864655478784   6015769032886583296
+--     SELECT 30 - (floor(ln(cell & -cell) / ln(2))::int / 2) AS level,
+--            count(*)
+--       FROM unnest(ST_S2Covering(...)) cell GROUP BY level;
+--     --   level |   n           (S2 edge)
+--     --   ------+------      -------------
+--     --     3   |   1         ~1 250 km
+--     --     4   |   6           ~500 km
+--     --     5   |   9           ~250 km
+--     --     6   |  21           ~125 km
+--     --     7   |  57            ~66 km
+--     --     8   | 182            ~33 km
+--     --     9   | 362            ~16 km
+--     --    10   | 626             ~8 km    <- min_level floor
+--     --    11   |  60             ~4 km
+--     --   12+   |  59          ~2 km-finer
 --
---   2)  For each of the 1 383 cells, spatial_candidates emits the same
---       BETWEEN + ANY(ancestors) UNION ALL shape shown in Q1/Q2/Q3
---       (just with cell-specific numbers).  Total index work:
---       1 383 BETWEEN range scans + 1 383 ANY(array) probes against
---       the range-sharded B-tree.  YB's Batched Nested Loop Join packs
---       these into a small number of DocDB round-trips.
+-- Step 3  -- for each of the 1 383 cells, spatial_candidates runs:
 --
---   3)  32 612 candidate rivers emerge from the index.  Phase 2 runs
---       the exact ST_Intersects(geom, envelope) through GEOS (C);
---       32 489 pass (only 123 rejected by the exact test - i.e. the
---       covering is already ~99.6 % precise for this workload).  The
---       final count matches PostGIS to the row.
+--     SELECT id FROM rivers_s2_index
+--      WHERE s2_cell BETWEEN (cell - (lsb - 1))
+--                        AND (cell + (lsb - 1))    -- lsb = cell & (-cell)
+--     UNION ALL
+--     SELECT id FROM rivers_s2_index
+--      WHERE s2_cell = ANY(<ancestors>::int8[]);   -- walks up to level 4
+--
+-- (See Q2_s2.sql for a fully-expanded example with literal numbers.)
+-- Total: 1 383 BETWEEN range scans + 1 383 ANY(array) probes against
+-- the range-sharded B-tree, packed by YB's Batched Nested Loop Join
+-- into a handful of DocDB round-trips.
+--
+-- Step 4  -- exact recheck in GEOS:
+--
+--     SELECT count(*) FROM rivers
+--      WHERE id IN (<candidate_ids>)
+--        AND ST_Intersects(geom,
+--                          ST_MakeEnvelope(-125, 30, -100, 50, 4326));
+--     --  32 612 candidates in  -> 32 489 pass
+--     --  (covering precision ~99.6 %: only 123 false positives)
 --
 -- WHY S2 STILL WINS DESPITE 1 383 CELLS:
 --
