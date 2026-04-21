@@ -60,8 +60,8 @@ pg_hits_q2=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_DWi
 pg_hits_q3=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
 pg_hits_q4=$(psql_pg bench_postgis "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
 
-s2_hits_q1=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.15, 40.52, -105.00, 40.65, 4326))) AND ST_DistanceSphere(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 5000;")
-s2_hits_q2=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))) AND ST_DistanceSphere(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;")
+s2_hits_q1=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.15, 40.52, -105.00, 40.65, 4326))) AND ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 5000;")
+s2_hits_q2=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))) AND ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;")
 s2_hits_q3=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
 s2_hits_q4=$(psql_yb bench_s2 "SELECT count(*) FROM rivers WHERE id IN (SELECT spatial_candidates('rivers', ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
 

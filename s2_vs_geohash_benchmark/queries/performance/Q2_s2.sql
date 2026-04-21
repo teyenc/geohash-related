@@ -55,6 +55,10 @@
 -- Phase 2: Batched Nested Loop Join fetches the 30 337 candidate main-
 -- table rows, then ST_DistanceSphere(geom, POINT) <= 50 000 keeps 25 337.
 -- ============================================================================
+-- NOTE: uses ST_DistanceSpheroid (Karney geodesic on WGS84) so the
+-- recheck matches PostGIS's ST_DWithin(geography,...) to the row.
+-- Older ST_DistanceSphere (Haversine on a WGS84 mean sphere) was
+-- ~0.07 % short at 40.5 deg lat, which dropped 26 rows near the boundary.
 EXPLAIN (ANALYZE, VERBOSE, DIST, DEBUG)
 SELECT count(*) AS hits
   FROM my_mapdata
@@ -63,5 +67,5 @@ SELECT count(*) AS hits
            'my_mapdata',
            ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))
        )
-   AND ST_DistanceSphere(geom,
-                         ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;
+   AND ST_DistanceSpheroid(geom,
+                           ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;

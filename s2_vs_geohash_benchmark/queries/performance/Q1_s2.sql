@@ -51,19 +51,23 @@
 -- implemented by our C `st_distance_sphere` -> 5 052 rows pass,
 -- top-N heap sort picks the nearest 10.
 -- ============================================================================
+-- NOTE: uses ST_DistanceSpheroid (Karney geodesic on WGS84 via vendored
+-- PROJ geodesic.{h,c}) so the recheck matches PostGIS's Vincenty-based
+-- ST_DWithin(geography,...) to the row.  ST_DistanceSphere would be ~50 m
+-- off at 40.5 deg lat and drop 26/7 927 rows on Q2 / similar edge cases.
 EXPLAIN (ANALYZE, VERBOSE, DIST, DEBUG)
 SELECT md_pk,
        md_name,
        md_city,
-       ST_DistanceSphere(geom,
-                         ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) AS dist_m
+       ST_DistanceSpheroid(geom,
+                           ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) AS dist_m
   FROM my_mapdata
  WHERE md_pk IN (
          SELECT spatial_candidates(
            'my_mapdata',
            ST_MakeEnvelope(-105.15, 40.52, -105.00, 40.65, 4326))
        )
-   AND ST_DistanceSphere(geom,
-                         ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 5000
+   AND ST_DistanceSpheroid(geom,
+                           ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 5000
  ORDER BY dist_m
  LIMIT 10;
