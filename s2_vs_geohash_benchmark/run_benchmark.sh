@@ -64,12 +64,16 @@ s2_hits_q1=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (S
 s2_hits_q2=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))) AND ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;")
 s2_hits_q3=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
 s2_hits_q4=$(psql_yb bench_s2 "SELECT count(*) FROM rivers WHERE id IN (SELECT spatial_candidates('rivers', ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
+# Q5: && bounding box overlap operator on the ~200 km Colorado Front Range box
+pg_hits_q5=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
+s2_hits_q5=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
 
 # Dan's hit counts (hardcoded per the queries' structure)
 d_hits_q1=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.15, 40.52, -105.00, 40.65, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 5000, true);")
 d_hits_q2=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.68, 40.08, -104.48, 41.08, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 50000, true);")
 d_hits_q3=$(psql_yb bench_dans "WITH covering AS (SELECT * FROM geohash_cells_for_bbox(-106.20, 38.80, -103.70, 40.80, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM covering)) AND ST_Intersects(geom, ST_MakePolygon(ARRAY[-106.20, -103.70, -103.70, -106.20, -106.20], ARRAY[38.80, 38.80, 40.80, 40.80, 38.80]));")
 d_hits_q4=$(psql_yb bench_dans "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakePolygon(ARRAY[-125.0, -100.0, -100.0, -125.0, -125.0], ARRAY[30.0, 30.0, 50.0, 50.0, 30.0]));")
+d_hits_q5=$(psql_yb bench_dans "SELECT count(*) FROM my_mapdata WHERE geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
 
 # ---- Timings ----
 echo ""
@@ -93,6 +97,11 @@ pg_t_q4=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q4_postgis.sql"
 d_t_q4=$( run_query yb bench_dans     "$ROOT/queries/performance/Q4_dans.sql")
 s2_t_q4=$(run_query yb bench_s2       "$ROOT/queries/performance/Q4_s2.sql")
 
+echo "[bench] running Q5 x $ITERS on 3 engines..."
+pg_t_q5=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q5_postgis.sql")
+d_t_q5=$( run_query yb bench_dans     "$ROOT/queries/performance/Q5_dans.sql")
+s2_t_q5=$(run_query yb bench_s2       "$ROOT/queries/performance/Q5_s2.sql")
+
 # ---- Output markdown ----
 cat > "$RESULTS/benchmark.md" <<EOF
 # Spatial index benchmark: PostGIS vs Dan's (geohash) vs yb_geospatial_s2
@@ -109,6 +118,7 @@ Timings: median of 5 runs (1 warmup discarded), in milliseconds
 | Q2 | Points within **50 km** of Fort Collins | $pg_hits_q2 | $s2_hits_q2 | $d_hits_q2 |
 | Q3 | Points inside **~200 km** Colorado Front Range box | $pg_hits_q3 | $s2_hits_q3 | $d_hits_q3 |
 | Q4 | **Rivers** intersecting western-US envelope (100,000 LineStrings) | $pg_hits_q4 | $s2_hits_q4 | $d_hits_q4 |
+| Q5 | **&& Bounding box overlap** (~200 km box, tests index vs seq scan) | $pg_hits_q5 | $s2_hits_q5 | $d_hits_q5 |
 
 ## Latency (median ms)
 
@@ -118,6 +128,7 @@ Timings: median of 5 runs (1 warmup discarded), in milliseconds
 | Q2 | $pg_t_q2 | $s2_t_q2 | $d_t_q2 |
 | Q3 | $pg_t_q3 | $s2_t_q3 | $d_t_q3 |
 | Q4 | $pg_t_q4 | $s2_t_q4 | $d_t_q4 (seq scan) |
+| Q5 | $pg_t_q5 | $s2_t_q5 | $d_t_q5 (seq scan) |
 
 EOF
 
