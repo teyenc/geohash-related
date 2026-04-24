@@ -75,6 +75,16 @@ d_hits_q3=$(psql_yb bench_dans "WITH covering AS (SELECT * FROM geohash_cells_fo
 d_hits_q4=$(psql_yb bench_dans "SELECT count(*) FROM rivers WHERE ST_Intersects(geom, ST_MakePolygon(ARRAY[-125.0, -100.0, -100.0, -125.0, -125.0], ARRAY[30.0, 30.0, 50.0, 50.0, 30.0]));")
 d_hits_q5=$(psql_yb bench_dans "SELECT count(*) FROM my_mapdata WHERE geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
 
+# Q6: 10 nearest POIs to Fort Collins (KNN).  We compare the sorted ID lists
+# from each engine to check we're returning the same neighbours.  PostGIS
+# uses planar <->, while S2 and Dan's use spheroidal distance; for a dense
+# local query the top-10 IDs match regardless.
+pg_knn_q6=$(psql_pg bench_postgis "SELECT string_agg(md_pk::text, ',' ORDER BY md_pk) FROM (SELECT md_pk FROM my_mapdata ORDER BY geom <-> ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326) LIMIT 10) s;")
+s2_knn_q6=$(psql_yb bench_s2      "SELECT string_agg(id::text, ',' ORDER BY id) FROM spatial_knn('my_mapdata', ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326), 10, 'md_pk');")
+d_knn_q6=$( psql_yb bench_dans    "SELECT string_agg(md_pk::text, ',' ORDER BY md_pk) FROM (SELECT md_pk FROM my_mapdata ORDER BY geom <-> ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326) LIMIT 10) s;")
+if [ "$pg_knn_q6" = "$s2_knn_q6" ]; then s2_q6_ok="matches PostGIS"; else s2_q6_ok="differs: $s2_knn_q6"; fi
+if [ "$pg_knn_q6" = "$d_knn_q6"  ]; then d_q6_ok="matches PostGIS";  else d_q6_ok="differs: $d_knn_q6";  fi
+
 # ---- Timings ----
 echo ""
 echo "[bench] running Q1 x $ITERS on 3 engines..."
@@ -102,6 +112,11 @@ pg_t_q5=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q5_postgis.sql"
 d_t_q5=$( run_query yb bench_dans     "$ROOT/queries/performance/Q5_dans.sql")
 s2_t_q5=$(run_query yb bench_s2       "$ROOT/queries/performance/Q5_s2.sql")
 
+echo "[bench] running Q6 x $ITERS on 3 engines..."
+pg_t_q6=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q6_postgis.sql")
+d_t_q6=$( run_query yb bench_dans     "$ROOT/queries/performance/Q6_dans.sql")
+s2_t_q6=$(run_query yb bench_s2       "$ROOT/queries/performance/Q6_s2.sql")
+
 # ---- Output markdown ----
 cat > "$RESULTS/benchmark.md" <<EOF
 # Spatial index benchmark: PostGIS vs Dan's (geohash) vs yb_geospatial_s2
@@ -119,6 +134,7 @@ Timings: median of 5 runs (1 warmup discarded), in milliseconds
 | Q3 | Points inside **~200 km** Colorado Front Range box | $pg_hits_q3 | $s2_hits_q3 | $d_hits_q3 |
 | Q4 | **Rivers** intersecting western-US envelope (100,000 LineStrings) | $pg_hits_q4 | $s2_hits_q4 | $d_hits_q4 |
 | Q5 | **&& Bounding box overlap** (~200 km box, tests index vs seq scan) | $pg_hits_q5 | $s2_hits_q5 | $d_hits_q5 |
+| Q6 | **KNN: 10 nearest POIs** to Fort Collins (top-k IDs) | 10 | $s2_q6_ok | $d_q6_ok |
 
 ## Latency (median ms)
 
@@ -129,6 +145,7 @@ Timings: median of 5 runs (1 warmup discarded), in milliseconds
 | Q3 | $pg_t_q3 | $s2_t_q3 | $d_t_q3 |
 | Q4 | $pg_t_q4 | $s2_t_q4 | $d_t_q4 (seq scan) |
 | Q5 | $pg_t_q5 | $s2_t_q5 | $d_t_q5 (seq scan) |
+| Q6 | $pg_t_q6 (GiST KNN) | $s2_t_q6 (spatial_knn) | $d_t_q6 (seq scan) |
 
 EOF
 
