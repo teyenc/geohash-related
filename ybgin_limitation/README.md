@@ -5,24 +5,75 @@ This folder documents a limitation in YugabyteDB's `ybgin` index that directly s
 ## TL;DR
 
 ```sql
-CREATE TABLE demo (id int PRIMARY KEY, tags text[]);
-CREATE INDEX ON demo USING ybgin (tags);
+CREATE TABLE objects (object_id int PRIMARY KEY, cell_ids int8[]);
+CREATE INDEX ON objects USING ybgin (cell_ids);
 
-SELECT id FROM demo WHERE tags @> ARRAY['a'];               -- ✅ works (single-key)
-SELECT id FROM demo WHERE tags && ARRAY['a','b','c'];       -- ❌ ERROR (multi-key OR)
+SELECT object_id FROM objects WHERE cell_ids @> ARRAY[100::int8];                 -- ✅ works (single cell)
+SELECT object_id FROM objects WHERE cell_ids && ARRAY[100::int8, 200, 300];       -- ❌ ERROR (multi-cell OR)
 --     ERROR:  unsupported ybgin index scan
 --     DETAIL:  ybgin index method cannot use more than one required
 --              scan entry: got 3.
 ```
 
+**Terminology map (toy → real):**
+
+| Toy reproducer | Real spatial use case |
+|---|---|
+| `object_id` | Any primary key of an indexed geometry (a point, line, or polygon row) |
+| `cell_ids int8[]` | The array of S2 cell IDs that cover that geometry |
+| `ARRAY[100, 200, 300]` in the query | The S2 cells covering the query envelope |
+| `cell_ids && ARRAY[…]` | "Does this object's cells overlap ANY query cell?" — the natural spatial filter |
+
 The `&&` operator is "overlaps ANY of these keys" — the exact semantics a spatial index needs. That OR semantic is what triggers the crash. (Note: `@>` with multiple elements also uses the index without crashing, but `@>` means "contains ALL" — wrong semantics for spatial queries. See "Why `@>` is not the workaround" below.)
+
+## How this maps to the real spatial use case
+
+The reproducer's `objects` table and `cell_ids int8[]` column are exactly the shape a CockroachDB-style spatial index would store per row. There is no rename or reinterpretation — the toy data is already the right type.
+
+### Concrete example
+
+If we had built the GIN approach, the table would look like:
+
+```sql
+CREATE TABLE shapes (
+  object_id int PRIMARY KEY,
+  name      text,
+  geom      geometry,
+  cell_ids  int8[]       -- one entry per S2 cell that covers `geom`
+);
+CREATE INDEX ON shapes USING ybgin (cell_ids);
+```
+
+Inserting California's state polygon:
+
+```sql
+INSERT INTO shapes VALUES (
+  1,
+  'California',
+  ST_GeomFromText('POLYGON(...)'),
+  ARRAY[1001::int8, 1002, 1003, 1004, 1005, 1006, 1007, 1008]  -- the 8-cell S2 covering
+);
+```
+
+A user asks "find shapes overlapping the Bay Area." The extension computes the Bay Area's S2 covering, say 4 cells `[2001, 2002, 2003, 2004]`, and runs:
+
+```sql
+SELECT object_id FROM shapes
+ WHERE cell_ids && ARRAY[2001::int8, 2002, 2003, 2004];
+--            ↑        ↑
+--   object's cells    query cells
+```
+
+This is structurally identical to CASE 2 in the reproducer (`cell_ids && ARRAY[100, 200, 300]`). It asks: "does this object's cell list have ANY cell in common with the query's cell list?" A yes-answer means the two geometries' S2 coverings overlap, which is the filter we want before the exact GEOS recheck.
+
+**And this is exactly the query shape that `ybgin` crashes on.** With N query cells, `nrequired = N`, and the `nrequired != 1` guard rejects it. That's why we had to abandon the GIN-based approach and build `yb_geospatial_s2` on a B-tree mapping table instead.
 
 ## Contents of this folder
 
 | File | What it is |
 |---|---|
 | `README.md` | This document |
-| `ybgin_bug_repro.sql` | Minimal `text[]` reproducer (works / crashes) |
+| `ybgin_bug_repro.sql` | Minimal `int8[]` reproducer with `object_id` / `cell_ids` column names, one-to-one with real spatial data |
 | `ybgin_bug_repro_jsonb.sql` | Alternate reproducer using `jsonb ?\|`, closest analogy to a spatial query |
 | `run_ybgin_bug_repro.sh` | Wrapper that runs both against a live YB cluster |
 
@@ -39,63 +90,79 @@ This runs both reproducers end-to-end and prints the expected error alongside th
 
 ### Option B — step by step in `ysqlsh`
 
-1. Connect to any YB database:
-   ```bash
-   /path/to/yugabyte/bin/ysqlsh -h 127.0.0.1 -p 5433 -U yugabyte -d yugabyte
-   ```
+**Step 1.** Connect to any YB database:
 
-2. Create a table with an array column and a `ybgin` index on it:
-   ```sql
-   DROP TABLE IF EXISTS ybgin_bug_demo;
+```bash
+/path/to/yugabyte/bin/ysqlsh -h 127.0.0.1 -p 5433 -U yugabyte -d yugabyte
+```
 
-   CREATE TABLE ybgin_bug_demo (
-     id    int   PRIMARY KEY,
-     tags  text[]
-   );
+**Step 2.** Create an `objects` table with a `cell_ids` array column and index it with `ybgin`:
 
-   INSERT INTO ybgin_bug_demo VALUES
-     (1, ARRAY['alpha',   'bravo']),
-     (2, ARRAY['bravo',   'charlie']),
-     (3, ARRAY['charlie', 'delta']),
-     (4, ARRAY['delta',   'echo']);
+```sql
+DROP TABLE IF EXISTS objects;
 
-   CREATE INDEX ybgin_bug_idx ON ybgin_bug_demo USING ybgin (tags);
-   ```
+CREATE TABLE objects (
+  object_id int    PRIMARY KEY,
+  cell_ids  int8[]
+);
 
-3. Run the two test cases:
+-- Three "objects" with overlapping S2-style cell coverings.
+INSERT INTO objects VALUES
+  (1, ARRAY[8520148959::int8, 8520148960]),
+  (2, ARRAY[8520148960::int8, 8520148961]),
+  (3, ARRAY[8520148961::int8, 8520148962]);
 
-   **CASE 1 — Single-key lookup (works):**
-   ```sql
-   SELECT id FROM ybgin_bug_demo WHERE tags @> ARRAY['alpha'];
-   ```
-   Expected: returns `id = 1`.
+CREATE INDEX objects_cell_idx ON objects USING ybgin (cell_ids);
+```
 
-   **CASE 2 — OR over multiple keys via `&&` (CRASHES):**
-   ```sql
-   SELECT id FROM ybgin_bug_demo WHERE tags && ARRAY['alpha', 'bravo', 'charlie'];
-   ```
-   Expected:
-   ```
-   ERROR:  unsupported ybgin index scan
-   DETAIL:  ybgin index method cannot use more than one required scan entry: got 3.
-   ```
+**Step 3. CASE 1 — Single-cell lookup (works).**
 
-4. (Optional) verify the planner actually chose the `ybgin` index before it errored:
-   ```sql
-   EXPLAIN SELECT id FROM ybgin_bug_demo WHERE tags && ARRAY['alpha','bravo','charlie'];
-   --  Index Scan using ybgin_bug_idx on ybgin_bug_demo
-   --    Index Cond: (tags && '{alpha,bravo,charlie}'::text[])
-   ```
-   So the planner did select the index — the crash happens inside the `ybgin` access method itself at execution time, not at planning time.
+```sql
+SELECT object_id FROM objects
+ WHERE cell_ids @> ARRAY[8520148959::int8];
+```
 
-5. Clean up:
-   ```sql
-   DROP TABLE ybgin_bug_demo;
-   ```
+Expected: returns `object_id = 1`.
+
+**Step 4. CASE 2 — Multi-cell OR via `&&` (CRASHES).**
+
+```sql
+SELECT object_id FROM objects
+ WHERE cell_ids && ARRAY[8520148959::int8, 8520148960, 8520148961];
+```
+
+Expected:
+
+```
+ERROR:  unsupported ybgin index scan
+DETAIL:  ybgin index method cannot use more than one required scan entry: got 3.
+```
+
+**Step 5. (Optional) verify the planner actually chose the `ybgin` index before it errored.**
+
+```sql
+EXPLAIN SELECT object_id FROM objects
+ WHERE cell_ids && ARRAY[8520148959::int8, 8520148960, 8520148961];
+```
+
+Expected plan:
+
+```
+Index Scan using objects_cell_idx on objects
+  Index Cond: (cell_ids && '{8520148959,8520148960,8520148961}'::bigint[])
+```
+
+So the planner did select the index — the crash happens inside the `ybgin` access method itself at execution time, not at planning time.
+
+**Step 6. Clean up.**
+
+```sql
+DROP TABLE objects;
+```
 
 ## Why `@>` is not the workaround
 
-A natural follow-up: `@> ARRAY['a','b','c']` also uses the `ybgin` index and does NOT crash. Can't we just use that for spatial queries?
+A natural follow-up: `@> ARRAY[100::int8, 200, 300]` also uses the `ybgin` index and does NOT crash. Can't we just use that for spatial queries?
 
 No, because `@>` has the wrong semantic. Given a row with cells `[C1, C2, C3]` and a query with cells `[C4, C5, C6]`:
 
@@ -130,9 +197,9 @@ There is a sibling guard a few lines above (`so->nkeys != 1`) that rejects multi
 ### Operators that trigger the crash
 | Operator | Query shape | Works on `ybgin`? |
 |---|---|---|
-| `tags @> ARRAY['x']` | single key | ✅ |
-| `tags @> ARRAY['x','y']` | contains ALL (AND) | ✅ (but wrong semantics for spatial) |
-| `tags && ARRAY['x','y','z']` | overlaps ANY (OR) | ❌ |
+| `cell_ids @> ARRAY[100]` | single cell | ✅ |
+| `cell_ids @> ARRAY[100, 200]` | contains ALL (AND) | ✅ (but wrong semantics for spatial) |
+| `cell_ids && ARRAY[100, 200, 300]` | overlaps ANY (OR) | ❌ |
 | `data ?\| ARRAY['x','y','z']` | jsonb key exists ANY (OR) | ❌ |
 | `v @@ to_tsquery('x \| y')` | tsquery OR | ❌ |
 | `v @@ to_tsquery('x & y')` | tsquery AND over multiple keys | ❌ (separate branch) |

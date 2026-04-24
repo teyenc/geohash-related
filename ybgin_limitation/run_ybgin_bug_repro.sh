@@ -2,9 +2,9 @@
 # ============================================================================
 # run_ybgin_bug_repro.sh
 #
-# Runs both the text[] and jsonb reproducers against a live YB cluster
-# and shows the expected crash alongside the working cases.  Nothing is
-# left behind (tables are dropped at the end of each script).
+# Runs both the int8[] (S2-style cell IDs) and jsonb reproducers against a
+# live YB cluster and shows the expected crash alongside the working cases.
+# Nothing is left behind (tables are dropped at the end of each script).
 # ============================================================================
 set -u
 
@@ -20,7 +20,7 @@ psql_yb() {
 }
 
 echo "================================================================"
-echo " REPRODUCER 1: text[] && ARRAY[...]"
+echo " REPRODUCER 1: int8[] cell IDs with && ARRAY[...]"
 echo "================================================================"
 psql_yb "$ROOT/ybgin_bug_repro.sql"
 
