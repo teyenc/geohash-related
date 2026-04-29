@@ -24,6 +24,7 @@ FLASK_PORT="5011"
 GS_PORT="8080"
 
 YSQLSH="$YB_SRC_DIR/build/latest/postgres/bin/ysqlsh"
+YBX_EXT_DIR="$YB_SRC_DIR/build/latest/postgres/share/extension"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,6 +48,7 @@ wait_for_port() {
 preflight() {
     log "Preflight checks"
     [ -x "$YSQLSH" ]                       || fail "ysqlsh not found at $YSQLSH — set YB_SRC_DIR"
+    [ -f "$YBX_EXT_DIR/yb_geospatial.control" ] || fail "Extension files missing: $YBX_EXT_DIR/yb_geospatial.control — rebuild YugabyteDB so yb-extensions installs yb_geospatial (see yugabyte-db/src/postgres/yb-extensions/Makefile)"
     [ -f "$YB_SRC_DIR/bin/yb-ctl" ]        || fail "yb-ctl not found — set YB_SRC_DIR"
     [ -f "$GEOSERVER_HOME/start.jar" ]     || fail "GeoServer not found — set GEOSERVER_HOME"
     [ -x "$JAVA_HOME/bin/java" ]           || fail "Java not found — set JAVA_HOME"
