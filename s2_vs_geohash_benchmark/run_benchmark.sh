@@ -2,9 +2,14 @@
 # ============================================================================
 # run_benchmark.sh
 #
-# Runs Q1/Q2/Q3 on PostGIS, Dan's, and yb_geospatial_s2, 6x each (discard
-# first warmup, take median of last 5).  Writes results/benchmark.json and
-# prints a markdown summary table.
+# Runs Q1..Q6 on FOUR engines:
+#   * PostGIS (vanilla PG15 / GiST)               -- correctness oracle
+#   * Dan's pure-SQL geohash on YB                -- old multi-precision path
+#   * yb_geospatial_s2 on YB (S2 cells, int64)    -- baseline we mirror
+#   * c_geohash on YB (geohash int64, this PR)    -- the new prototype
+#
+# 6x per query (1 warmup discarded, median of remaining 5). Writes
+# results/benchmark.md.
 # ============================================================================
 set -euo pipefail
 
@@ -64,9 +69,16 @@ s2_hits_q1=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (S
 s2_hits_q2=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))) AND ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;")
 s2_hits_q3=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
 s2_hits_q4=$(psql_yb bench_s2 "SELECT count(*) FROM rivers WHERE id IN (SELECT spatial_candidates('rivers', ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
+# c_geohash hit counts (mirror of the S2 forms; cgeo_spatial_candidates +
+# the same ST_DistanceSpheroid / ST_Intersects rechecks).
+cg_hits_q1=$(psql_yb bench_cgeo "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT cgeo_spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.15, 40.52, -105.00, 40.65, 4326))) AND ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 5000;")
+cg_hits_q2=$(psql_yb bench_cgeo "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT cgeo_spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.68, 40.08, -104.48, 41.08, 4326))) AND ST_DistanceSpheroid(geom, ST_GeomFromText('POINT(-105.0775 40.5853)', 4326)) <= 50000;")
+cg_hits_q3=$(psql_yb bench_cgeo "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT cgeo_spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326));")
+cg_hits_q4=$(psql_yb bench_cgeo "SELECT count(*) FROM rivers WHERE id IN (SELECT cgeo_spatial_candidates('rivers', ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326))) AND ST_Intersects(geom, ST_MakeEnvelope(-125.0, 30.0, -100.0, 50.0, 4326));")
 # Q5: && bounding box overlap operator on the ~200 km Colorado Front Range box
 pg_hits_q5=$(psql_pg bench_postgis "SELECT count(*) FROM my_mapdata WHERE geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
 s2_hits_q5=$(psql_yb bench_s2 "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
+cg_hits_q5=$(psql_yb bench_cgeo "SELECT count(*) FROM my_mapdata WHERE md_pk IN (SELECT cgeo_spatial_candidates('my_mapdata', ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326))) AND geom && ST_MakeEnvelope(-106.20, 38.80, -103.70, 40.80, 4326);")
 
 # Dan's hit counts (hardcoded per the queries' structure)
 d_hits_q1=$(psql_yb bench_dans "WITH nearby_cells AS (SELECT * FROM geohash_cells_for_bbox(-105.15, 40.52, -105.00, 40.65, 5) h) SELECT count(*) FROM my_mapdata WHERE left(geo_hash10, 5) = ANY(ARRAY(SELECT h FROM nearby_cells)) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 5000, true);")
@@ -82,70 +94,82 @@ d_hits_q5=$(psql_yb bench_dans "SELECT count(*) FROM my_mapdata WHERE geom && ST
 pg_knn_q6=$(psql_pg bench_postgis "SELECT string_agg(md_pk::text, ',' ORDER BY md_pk) FROM (SELECT md_pk FROM my_mapdata ORDER BY geom <-> ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326) LIMIT 10) s;")
 s2_knn_q6=$(psql_yb bench_s2      "SELECT string_agg(id::text, ',' ORDER BY id) FROM spatial_knn('my_mapdata', ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326), 10, 'md_pk');")
 d_knn_q6=$( psql_yb bench_dans    "SELECT string_agg(md_pk::text, ',' ORDER BY md_pk) FROM (SELECT md_pk FROM my_mapdata ORDER BY geom <-> ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326) LIMIT 10) s;")
+# c_geohash KNN: radius-bounded (Q6_c_geohash.sql) — 5 km bbox, recheck via
+# ST_DWithin, ORDER BY dist + LIMIT 10. Worst-case sparse falls through to
+# the seqscan companion file (Q6_c_geohash_seqscan.sql) which is identical
+# to Q6_dans / Q6_s2_seqscan.
+cg_knn_q6=$(psql_yb bench_cgeo    "SELECT string_agg(md_pk::text, ',' ORDER BY md_pk) FROM (SELECT md_pk FROM my_mapdata WHERE md_pk IN (SELECT cgeo_spatial_candidates('my_mapdata', ST_MakeEnvelope(-105.1365, 40.5403, -105.0185, 40.6303, 4326))) AND ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, 5000, true) ORDER BY ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography, true) LIMIT 10) s;")
 if [ "$pg_knn_q6" = "$s2_knn_q6" ]; then s2_q6_ok="matches PostGIS"; else s2_q6_ok="differs: $s2_knn_q6"; fi
 if [ "$pg_knn_q6" = "$d_knn_q6"  ]; then d_q6_ok="matches PostGIS";  else d_q6_ok="differs: $d_knn_q6";  fi
+if [ "$pg_knn_q6" = "$cg_knn_q6" ]; then cg_q6_ok="matches PostGIS"; else cg_q6_ok="differs: $cg_knn_q6"; fi
 
 # ---- Timings ----
 echo ""
-echo "[bench] running Q1 x $ITERS on 3 engines..."
+echo "[bench] running Q1 x $ITERS on 4 engines..."
 pg_t_q1=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q1_postgis.sql")
 d_t_q1=$( run_query yb bench_dans     "$ROOT/queries/performance/Q1_dans.sql")
 s2_t_q1=$(run_query yb bench_s2       "$ROOT/queries/performance/Q1_s2.sql")
+cg_t_q1=$(run_query yb bench_cgeo     "$ROOT/queries/performance/Q1_c_geohash.sql")
 
-echo "[bench] running Q2 x $ITERS on 3 engines..."
+echo "[bench] running Q2 x $ITERS on 4 engines..."
 pg_t_q2=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q2_postgis.sql")
 d_t_q2=$( run_query yb bench_dans     "$ROOT/queries/performance/Q2_dans.sql")
 s2_t_q2=$(run_query yb bench_s2       "$ROOT/queries/performance/Q2_s2.sql")
+cg_t_q2=$(run_query yb bench_cgeo     "$ROOT/queries/performance/Q2_c_geohash.sql")
 
-echo "[bench] running Q3 x $ITERS on 3 engines..."
+echo "[bench] running Q3 x $ITERS on 4 engines..."
 pg_t_q3=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q3_postgis.sql")
 d_t_q3=$( run_query yb bench_dans     "$ROOT/queries/performance/Q3_dans.sql")
 s2_t_q3=$(run_query yb bench_s2       "$ROOT/queries/performance/Q3_s2.sql")
+cg_t_q3=$(run_query yb bench_cgeo     "$ROOT/queries/performance/Q3_c_geohash.sql")
 
-echo "[bench] running Q4 x $ITERS on 3 engines..."
+echo "[bench] running Q4 x $ITERS on 4 engines..."
 pg_t_q4=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q4_postgis.sql")
 d_t_q4=$( run_query yb bench_dans     "$ROOT/queries/performance/Q4_dans.sql")
 s2_t_q4=$(run_query yb bench_s2       "$ROOT/queries/performance/Q4_s2.sql")
+cg_t_q4=$(run_query yb bench_cgeo     "$ROOT/queries/performance/Q4_c_geohash.sql")
 
-echo "[bench] running Q5 x $ITERS on 3 engines..."
+echo "[bench] running Q5 x $ITERS on 4 engines..."
 pg_t_q5=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q5_postgis.sql")
 d_t_q5=$( run_query yb bench_dans     "$ROOT/queries/performance/Q5_dans.sql")
 s2_t_q5=$(run_query yb bench_s2       "$ROOT/queries/performance/Q5_s2.sql")
+cg_t_q5=$(run_query yb bench_cgeo     "$ROOT/queries/performance/Q5_c_geohash.sql")
 
-echo "[bench] running Q6 x $ITERS on 3 engines..."
+echo "[bench] running Q6 x $ITERS on 4 engines..."
 pg_t_q6=$(run_query pg bench_postgis  "$ROOT/queries/performance/Q6_postgis.sql")
 d_t_q6=$( run_query yb bench_dans     "$ROOT/queries/performance/Q6_dans.sql")
 s2_t_q6=$(run_query yb bench_s2       "$ROOT/queries/performance/Q6_s2.sql")
+cg_t_q6=$(run_query yb bench_cgeo     "$ROOT/queries/performance/Q6_c_geohash.sql")
 
 # ---- Output markdown ----
 cat > "$RESULTS/benchmark.md" <<EOF
-# Spatial index benchmark: PostGIS vs Dan's (geohash) vs yb_geospatial_s2
+# Spatial index benchmark: PostGIS vs Dan's vs yb_geospatial_s2 vs c_geohash
 
-Dataset: 344,688 POI rows (Dan's \`19_mapData.pipe\`)
+Dataset: 344,688 POI rows (Dan's \`19_mapData.pipe\`) + 100,000 synthetic rivers
 Date: $(date)
 Timings: median of 5 runs (1 warmup discarded), in milliseconds
 
 ## Correctness (rows returned, ignoring order)
 
-| Query | Description | PostGIS | S2 (ours) | Dan's (geohash) |
-|-------|-------------|--------:|----------:|----------------:|
-| Q1 | Points within **5 km** of Fort Collins | $pg_hits_q1 | $s2_hits_q1 | $d_hits_q1 |
-| Q2 | Points within **50 km** of Fort Collins | $pg_hits_q2 | $s2_hits_q2 | $d_hits_q2 |
-| Q3 | Points inside **~200 km** Colorado Front Range box | $pg_hits_q3 | $s2_hits_q3 | $d_hits_q3 |
-| Q4 | **Rivers** intersecting western-US envelope (100,000 LineStrings) | $pg_hits_q4 | $s2_hits_q4 | $d_hits_q4 |
-| Q5 | **&& Bounding box overlap** (~200 km box, tests index vs seq scan) | $pg_hits_q5 | $s2_hits_q5 | $d_hits_q5 |
-| Q6 | **KNN: 10 nearest POIs** to Fort Collins (top-k IDs) | 10 | $s2_q6_ok | $d_q6_ok |
+| Query | Description | PostGIS | S2 | Dan's | c_geohash |
+|-------|-------------|--------:|---:|------:|----------:|
+| Q1 | Points within **5 km** of Fort Collins | $pg_hits_q1 | $s2_hits_q1 | $d_hits_q1 | $cg_hits_q1 |
+| Q2 | Points within **50 km** of Fort Collins | $pg_hits_q2 | $s2_hits_q2 | $d_hits_q2 | $cg_hits_q2 |
+| Q3 | Points inside **~200 km** Colorado Front Range box | $pg_hits_q3 | $s2_hits_q3 | $d_hits_q3 | $cg_hits_q3 |
+| Q4 | **Rivers** intersecting western-US envelope (100,000 LineStrings) | $pg_hits_q4 | $s2_hits_q4 | $d_hits_q4 | $cg_hits_q4 |
+| Q5 | **&& Bounding box overlap** (~200 km box, tests index vs seq scan) | $pg_hits_q5 | $s2_hits_q5 | $d_hits_q5 | $cg_hits_q5 |
+| Q6 | **KNN: 10 nearest POIs** to Fort Collins (top-k IDs) | 10 | $s2_q6_ok | $d_q6_ok | $cg_q6_ok |
 
 ## Latency (median ms)
 
-| Query | PostGIS | S2 (ours) | Dan's (geohash) |
-|-------|--------:|----------:|----------------:|
-| Q1 | $pg_t_q1 | $s2_t_q1 | $d_t_q1 |
-| Q2 | $pg_t_q2 | $s2_t_q2 | $d_t_q2 |
-| Q3 | $pg_t_q3 | $s2_t_q3 | $d_t_q3 |
-| Q4 | $pg_t_q4 | $s2_t_q4 | $d_t_q4 (seq scan) |
-| Q5 | $pg_t_q5 | $s2_t_q5 | $d_t_q5 (seq scan) |
-| Q6 | $pg_t_q6 (GiST KNN) | $s2_t_q6 (spatial_knn) | $d_t_q6 (seq scan) |
+| Query | PostGIS | S2 | Dan's | c_geohash |
+|-------|--------:|---:|------:|----------:|
+| Q1 | $pg_t_q1 | $s2_t_q1 | $d_t_q1 | $cg_t_q1 |
+| Q2 | $pg_t_q2 | $s2_t_q2 | $d_t_q2 | $cg_t_q2 |
+| Q3 | $pg_t_q3 | $s2_t_q3 | $d_t_q3 | $cg_t_q3 |
+| Q4 | $pg_t_q4 | $s2_t_q4 | $d_t_q4 (seq scan) | $cg_t_q4 (NL join) |
+| Q5 | $pg_t_q5 | $s2_t_q5 | $d_t_q5 (seq scan) | $cg_t_q5 |
+| Q6 | $pg_t_q6 (GiST KNN) | $s2_t_q6 (spatial_knn) | $d_t_q6 (seq scan) | $cg_t_q6 (radius bbox) |
 
 EOF
 

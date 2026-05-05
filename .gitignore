@@ -8,3 +8,4 @@ geospatial_demo/data/19_mapData.pipe
 s2_vs_geohash_benchmark/pg_data/
 s2_vs_geohash_benchmark/results/
 s2_vs_geohash_benchmark/data/
+distortion_test/results/
