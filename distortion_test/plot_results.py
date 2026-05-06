@@ -34,11 +34,20 @@ import matplotlib.pyplot as plt
 
 
 def find_latest_csv(here):
-    pattern = os.path.join(here, "results", "radius_sweep_*.csv")
-    candidates = sorted(glob.glob(pattern))
-    if not candidates:
-        sys.exit(f"No CSV found matching {pattern}")
-    return candidates[-1]
+    """
+    Prefer the new layout: results/run_<ts>/radius_sweep.csv. Fall back to
+    the legacy flat layout (results/radius_sweep_<ts>.csv) if no run_* dir
+    exists, so old runs still plot.
+    """
+    new = sorted(glob.glob(os.path.join(here, "results", "run_*",
+                                        "radius_sweep.csv")))
+    if new:
+        return new[-1]
+    legacy = sorted(glob.glob(os.path.join(here, "results",
+                                           "radius_sweep_*.csv")))
+    if legacy:
+        return legacy[-1]
+    sys.exit(f"No CSV found in {os.path.join(here, 'results')}")
 
 
 def load(csv_path):
@@ -144,10 +153,20 @@ def main():
     if not rows:
         sys.exit(f"No rows found in {csv_path}")
 
-    stem = os.path.splitext(csv_path)[0]
     print(f"reading {csv_path} ({len(rows)} rows)")
-    plot_latency_vs_lat(rows, stem + "_latency.png")
-    plot_cells_vs_lat(rows, stem + "_cells.png")
+    # New-layout runs put outputs alongside radius_sweep.csv inside the
+    # run folder; legacy-layout still appends suffixes to the CSV stem.
+    parent = os.path.dirname(csv_path)
+    is_new_layout = os.path.basename(csv_path) == "radius_sweep.csv"
+    if is_new_layout:
+        latency_path = os.path.join(parent, "latency.png")
+        cells_path   = os.path.join(parent, "cells.png")
+    else:
+        stem = os.path.splitext(csv_path)[0]
+        latency_path = stem + "_latency.png"
+        cells_path   = stem + "_cells.png"
+    plot_latency_vs_lat(rows, latency_path)
+    plot_cells_vs_lat(rows, cells_path)
 
 
 if __name__ == "__main__":

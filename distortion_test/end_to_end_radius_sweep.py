@@ -142,12 +142,14 @@ def main():
           f"median reported")
     print(f"# One row per (lat, r, lon) — no aggregation across longitudes.\n")
 
-    # CSV output goes to distortion_test/results/ (in .gitignore).
+    # Each run gets its own subdir under distortion_test/results/<ts>/, so
+    # CSV + later PNG/MD outputs from plot_results.py and tabulate_results.py
+    # all live in one self-contained folder per run. Easy to delete or share.
     here = os.path.dirname(os.path.realpath(__file__))
-    results_dir = os.path.join(here, "results")
-    os.makedirs(results_dir, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_path = os.path.join(results_dir, f"radius_sweep_{ts}.csv")
+    run_dir = os.path.join(here, "results", f"run_{ts}")
+    os.makedirs(run_dir, exist_ok=True)
+    csv_path = os.path.join(run_dir, "radius_sweep.csv")
     csv_fp = open(csv_path, "w", newline="")
     csv_w = csv.writer(csv_fp)
     csv_w.writerow([

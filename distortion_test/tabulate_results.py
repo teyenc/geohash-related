@@ -23,11 +23,20 @@ import statistics
 
 
 def find_latest_csv(here):
-    pattern = os.path.join(here, "results", "radius_sweep_*.csv")
-    candidates = sorted(glob.glob(pattern))
-    if not candidates:
-        sys.exit(f"No CSV found matching {pattern}")
-    return candidates[-1]
+    """
+    Prefer the new layout (results/run_<ts>/radius_sweep.csv). Fall back to
+    the legacy flat layout (results/radius_sweep_<ts>.csv) if no run_* dir
+    exists.
+    """
+    new = sorted(glob.glob(os.path.join(here, "results", "run_*",
+                                        "radius_sweep.csv")))
+    if new:
+        return new[-1]
+    legacy = sorted(glob.glob(os.path.join(here, "results",
+                                           "radius_sweep_*.csv")))
+    if legacy:
+        return legacy[-1]
+    sys.exit(f"No CSV found in {os.path.join(here, 'results')}")
 
 
 def load(csv_path):
@@ -106,8 +115,18 @@ def main():
     gh_cells_med = median_per_lat_r(rows, "gh_cells")
     s2_cells_med = median_per_lat_r(rows, "s2_cells")
 
-    stem = os.path.splitext(csv_path)[0]
     print(f"reading {csv_path} ({len(rows)} rows)\n")
+    # New-layout runs put outputs alongside radius_sweep.csv; legacy still
+    # appends suffixes to the CSV stem.
+    parent = os.path.dirname(csv_path)
+    is_new_layout = os.path.basename(csv_path) == "radius_sweep.csv"
+    if is_new_layout:
+        latency_md_path = os.path.join(parent, "latency.md")
+        cells_md_path   = os.path.join(parent, "cells.md")
+    else:
+        stem = os.path.splitext(csv_path)[0]
+        latency_md_path = stem + "_latency.md"
+        cells_md_path   = stem + "_cells.md"
 
     latency_md = render_table(
         "Latency by latitude (median ms across longitudes)",
@@ -121,12 +140,12 @@ def main():
     print(cells_md)
 
     # Save .md alongside the CSV
-    with open(stem + "_latency.md", "w") as fh:
+    with open(latency_md_path, "w") as fh:
         fh.write(latency_md + "\n")
-    with open(stem + "_cells.md", "w") as fh:
+    with open(cells_md_path, "w") as fh:
         fh.write(cells_md + "\n")
-    print(f"# wrote {stem}_latency.md")
-    print(f"# wrote {stem}_cells.md")
+    print(f"# wrote {latency_md_path}")
+    print(f"# wrote {cells_md_path}")
 
 
 if __name__ == "__main__":
