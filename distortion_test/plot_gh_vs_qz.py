@@ -66,7 +66,7 @@ def plot_cells_vs_size(agg, out_path):
             linewidth=2.5, label="quadtree-Z (4-ary tree, Z curve)")
 
     ax.set_xlabel("Query half-width (km)")
-    ax.set_ylabel("Cells in exact cover")
+    ax.set_ylabel("Number of cells generated")
     ax.set_title("Cells per query: geohash vs quadtree-Z, at lat=0\n"
                  "(median across 4 anchor longitudes; same algorithm "
                  "and Z-order curve, only tree branching factor differs)")
