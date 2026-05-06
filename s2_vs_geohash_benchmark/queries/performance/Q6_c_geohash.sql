@@ -1,15 +1,15 @@
 -- Q6_c_geohash.sql : 10 nearest POIs to Fort Collins, CO (KNN).
 -- ============================================================================
--- KNN with c_geohash: a B-tree on a geohash int64 cell ID cannot traverse
--- in distance order (Z-order ≠ Euclidean order), so the canonical pattern
+-- KNN with c_geohash: a B-tree on a geohash text key cannot traverse in
+-- distance order (Z-order ≠ Euclidean order), so the canonical pattern
 --
 --     ORDER BY geom <-> point LIMIT 10
 --
 -- would Seq Scan + heapsort.  See Q6_c_geohash_seqscan.sql for that
 -- foot-gun.  This file does the supported pattern instead:
 --
---     1.  Pre-filter to a fixed-radius envelope (5 km) via the same
---         cgeo_spatial_candidates path Q1_c_geohash uses.
+--     1.  Pre-filter to a fixed-radius envelope (5 km) via
+--         cgeo_text_spatial_candidates at query precision 6.
 --     2.  Recheck distance with ST_DWithin (Vincenty) and ORDER BY.
 --
 -- The 5 km radius is sized to comfortably contain the 10 nearest POIs
@@ -30,10 +30,10 @@ SELECT md_pk,
                    true) AS dist_m
   FROM my_mapdata
  WHERE md_pk IN (
-         SELECT cgeo_spatial_candidates(
+         SELECT cgeo_text_spatial_candidates(
            'my_mapdata',
            ST_MakeEnvelope(-105.0775 - 0.0590, 40.5853 - 0.0450,
-                           -105.0775 + 0.0590, 40.5853 + 0.0450, 4326)))
+                           -105.0775 + 0.0590, 40.5853 + 0.0450, 4326), 6))
    AND ST_DWithin(geom::geography,
                   ST_SetSRID(ST_MakePoint(-105.0775, 40.5853), 4326)::geography,
                   5000, true)
