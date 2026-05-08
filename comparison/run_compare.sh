@@ -712,23 +712,24 @@ print_connect_banner() {
     cat <<EOF
 
 ============================================================
-  COPY ALL 3 LINES INTO YOUR LOCAL macOS SHELL (in one paste)
-  -> spawns 3 native Terminal.app windows, one per DB
+  COPY ALL 3 LINES BELOW, PASTE INTO YOUR LOCAL macOS SHELL
+  -> spawns 3 separate Terminal.app windows, one per DB
 ============================================================
 
 osascript -e "tell app \"Terminal\" to do script \"ssh -t $ssh_target '$HELPER_PATH geohash'\""
 osascript -e "tell app \"Terminal\" to do script \"ssh -t $ssh_target '$HELPER_PATH s2'\""
 osascript -e "tell app \"Terminal\" to do script \"ssh -t $ssh_target '$HELPER_PATH postgis'\""
 
-The remote command is the absolute path to bench-open (no ~ expansion,
-no line wrap concerns).  Wrapped in single quotes so the receiving shell
-parses atomically.
+Each osascript line spawns its OWN Terminal window with an ssh session
+already logged in.  Don't paste them into the same window -- the first
+ssh would block and swallow the others as input.
 
-If pasting misbehaves, open 3 terminals manually and paste:
+If you'd rather not use AppleScript, open 3 macOS Terminal tabs (Cmd-T)
+and paste ONE of these into each tab:
 
-  ssh -t $ssh_target '$HELPER_PATH geohash'
-  ssh -t $ssh_target '$HELPER_PATH s2'
-  ssh -t $ssh_target '$HELPER_PATH postgis'
+  ssh -t $ssh_target '$HELPER_PATH geohash'    <- paste in tab 1
+  ssh -t $ssh_target '$HELPER_PATH s2'         <- paste in tab 2
+  ssh -t $ssh_target '$HELPER_PATH postgis'    <- paste in tab 3
 
 Override the SSH target:  SSH_TARGET=<alias> ./run_compare.sh start
 (e.g. if ~/.ssh/config has "Host dev ...", use SSH_TARGET=dev)
