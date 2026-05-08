@@ -364,8 +364,22 @@ The core difference this exposes: **Dan's cell count grows with query area** (12
 ### Showstopper bug caught: hash-sharded mapping table
 Our first `create_spatial_index` used `PRIMARY KEY (s2_cell, id)` which YB interprets as `s2_cell HASH, id ASC`. A `BETWEEN` on `s2_cell` fans out to **every tablet** — effectively a sequential scan. First Q1 run: **3 500 ms**, 2.7 M rows scanned. Fix: `PRIMARY KEY (s2_cell ASC, id)` → range-sharded → **115 ms**, 10 rows scanned per BETWEEN. Already committed to the extension SQL.
 
-### Planner bug caught: OR predicate forced a Seq Scan
+### Planner bug caught: OR predicate forced a Seq Scan (HISTORICAL — fixed in YB 2.31)
 `WHERE s2_cell BETWEEN $1 AND $2 OR s2_cell = ANY($3)` cannot use the B-tree index — YB has no BitmapOr/BitmapHeapScan executor. Rewriting as `UNION ALL` of two index scans dropped a Q1 variant from 430 ms → 2 ms. Also already committed.
+
+> **Update for YB 2.31+:** YB now has BitmapOr/BitmapHeapScan, gated by `yb_enable_bitmapscan = on` (the default). The OR-predicate form now uses `YB Bitmap Table Scan → BitmapOr → N Bitmap Index Scans` and is competitive with the UNION ALL form. Empirical re-test (run on `latitude_test_s2_index`, range-sharded, 1.8 M rows, May 2026):
+>
+> | N ranges | OR'd BETWEEN | UNION ALL | unnest+JOIN |
+> |---|---:|---:|---:|
+> | 10   |   4.5 ms |   4.4 ms |   3.3 ms |
+> | 100  |  30 ms   |  37 ms   |  26 ms   |
+> | 500  | 146 ms   | 167 ms   | 144 ms   |
+> | 1000 | 327 ms   | 314 ms   | **256 ms** |
+> | 2000 | 618 ms   | 679 ms   | **560 ms** |
+>
+> All three forms use the index and scale roughly linearly with N. **`unnest + JOIN` (the BNL form `cgeo_spatial_candidates` and `spatial_candidates_v2` use) is consistently 10–20% faster** because YB Batched Nested Loop Join probes the index with a single batched RPC per outer batch (default ~512 ranges) instead of N separate scans. So the unnest+JOIN pattern remains the recommended one for large covers — but OR no longer falls back to seq scan and the UNION ALL workaround is no longer required for correctness.
+>
+> If `yb_enable_bitmapscan` is somehow turned off, the OR form does still degrade to Parallel Seq Scan (we measured 1,323 ms vs 2.4 ms with bitmapscan on for the 4-OR test). So the workaround logic is still defensive against that edge case.
 
 ### Write-path cost not measured (by design)
 The `spatial_candidates` bulk load inserted 345 546 S2 cell rows for 344 688 points (~1 cell/POI because these are points at `min_level=10`). Loading a polygon-heavy table would insert 5–10× more mapping rows per geometry. That's the cost of no-parent-expansion.

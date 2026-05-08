@@ -5,22 +5,25 @@ End-to-end Phase 2+3 setup for the latitude-distortion benchmark.
 What this does, in order:
   1. Drop+recreate database `lat_bench` on the running YB cluster.
   2. Install c_geohash and yb_geospatial_s2 extensions.
-  3. Create `latitude_test` table:
-       (id, lat, lon, geom, geohash10) plus B-tree on geohash10.
-     yb_geospatial_s2's create_spatial_index() builds the S2 mapping table
-     and trigger.
+  3. Create `latitude_test` table: (id, lat, lon, geom, geohash10).
+     - gh side: create_geohash_index() (from c_geohash) installs the
+       B-tree on geohash10 and a BEFORE INSERT/UPDATE trigger that auto-
+       fills geohash10 from (lat, lon).
+     - S2 side: create_spatial_index() (from yb_geospatial_s2) builds the
+       S2 mapping table and the s2_auto_index trigger; we disable that
+       trigger for bulk load.
   4. Generate ~50k uniform points within ±100 km of each test latitude
      (lat ∈ {0, 30, 45, 60, 70, 80, 85, 87, 89}). 9 × 50k = ~450k rows.
      "Uniform" means uniform on the surface within a geodesic neighborhood
      (azimuthal-equidistant projection trick).
-  5. COPY into staging table → INSERT into final table (computing geohash10
-     and geom in SQL via c_geohash_covering).
+  5. COPY into staging table → INSERT into final table. The gh trigger
+     auto-fills geohash10 per row; geom is built inline via ST_MakePoint.
   6. Bulk-build the S2 mapping after disabling the trigger, then re-enable.
 
 Configuration matches the agreed plan:
   - all 9 test latitudes
   - 50k points per latitude, ~100 km neighborhood radius
-  - geohash precision 10 (matches c_geohash_l10_ranges_merged storage)
+  - geohash precision 10 (matches the geohash10 column width)
   - S2 max_level 18 (matches our function-level proof's (p7, L16) pair —
     L18 is the deeper-by-one match for p10's storage granularity).
 
@@ -135,55 +138,29 @@ def main():
             band_lat  double precision NOT NULL,
             lat       double precision NOT NULL,
             lon       double precision NOT NULL,
-            geohash10 text             NOT NULL,
+            geohash10 text,
             geom      geometry
         );
     """)
-    # ASC index = B-tree range index. YB defaults to HASH which only supports
-    # equality lookups, not BETWEEN range scans — geohash_candidates needs the
-    # range scan path to work, so we explicitly request ASC ordering.
-    run_sql("""
-        CREATE INDEX latitude_test_geohash10_idx
-            ON latitude_test (geohash10 ASC);
-    """)
+    # gh side: c_geohash's create_geohash_index() installs an ASC B-tree on
+    # geohash10 and a BEFORE INSERT/UPDATE trigger that auto-fills geohash10
+    # from (lat, lon). Parallel to the S2 setup below.
+    run_sql(
+        f"SELECT create_geohash_index('latitude_test', 'lat', 'lon', "
+        f"{GEOHASH_PRECISION});"
+    )
+    # S2 side: yb_geospatial_s2's create_spatial_index() builds the
+    # latitude_test_s2_index mapping table + s2_auto_index trigger. We
+    # disable the S2 trigger for bulk load (each row would otherwise fire
+    # an extra INSERT into the mapping table); we'll re-enable it after the
+    # bulk-fill step below.
     run_sql("SELECT create_spatial_index('latitude_test', 'geom', 'id');")
     run_sql("ALTER TABLE latitude_test DISABLE TRIGGER trg_s2_latitude_test;")
 
-    # PL/pgSQL helper for geohash range scans. Mirrors yb_geospatial_s2's
-    # spatial_candidates() pattern: one EXECUTE per merged prefix range. YB
-    # lacks BitmapOr, so a multi-range disjunctive WHERE degrades to seq scan.
-    # The FOR loop with a single BETWEEN per iteration keeps each scan on the
-    # B-tree index.
-    run_sql("""
-        CREATE OR REPLACE FUNCTION geohash_candidates(
-            p_table_name      text,
-            p_lon_min         float8,
-            p_lat_min         float8,
-            p_lon_max         float8,
-            p_lat_max         float8,
-            p_query_precision int
-        ) RETURNS SETOF int8
-        LANGUAGE plpgsql AS $$
-        DECLARE
-            ranges    text[];
-            gh_min    text;
-            gh_max    text;
-            n         int;
-        BEGIN
-            ranges := c_geohash_l10_ranges_merged(
-                p_lon_min, p_lat_min, p_lon_max, p_lat_max, p_query_precision);
-            n := coalesce(array_length(ranges, 1), 0);
-            FOR i IN 1..n/2 LOOP
-                gh_min := ranges[2*i - 1];
-                gh_max := ranges[2*i];
-                RETURN QUERY EXECUTE format(
-                    'SELECT id FROM %I WHERE geohash10 BETWEEN $1 AND $2',
-                    p_table_name
-                ) USING gh_min, gh_max;
-            END LOOP;
-        END;
-        $$;
-    """)
+    # geohash_candidates() now lives in the c_geohash extension itself
+    # (signature: (table_name, geom, min_prec, max_prec, max_cells)). It
+    # drives one BETWEEN range scan per adaptive cover cell; mirrors
+    # yb_geospatial_s2's spatial_candidates_v2().
 
     # PL/pgSQL helper for S2 candidate lookup. Same shape as the extension's
     # built-in spatial_candidates(), but uses the 4-arg ST_S2Covering so we
@@ -300,10 +277,11 @@ def main():
     print(f"      copied to _staging in {time.time()-t0:.1f}s")
 
     t0 = time.time()
-    run_sql(f"""
-        INSERT INTO latitude_test (band_lat, lat, lon, geohash10, geom)
+    # geohash10 is filled by the BEFORE INSERT trigger installed by
+    # create_geohash_index() above; we only INSERT (band_lat, lat, lon, geom).
+    run_sql("""
+        INSERT INTO latitude_test (band_lat, lat, lon, geom)
         SELECT band_lat, lat, lon,
-               (c_geohash_covering(lon, lat, lon, lat, {GEOHASH_PRECISION}))[1],
                ST_SetSRID(ST_MakePoint(lon, lat), 4326)
         FROM _staging;
     """)

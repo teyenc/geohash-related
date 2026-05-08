@@ -17,8 +17,8 @@
 #       - rivers     (LineStrings)      : level 5   (~5 km × 5 km, ≤ ~225 cells
 #                                                    per ~75 km river bbox)
 #   * Query side issues `BETWEEN min10 AND max10` per (min10, max10) pair from
-#     c_geohash_l10_ranges_merged. Constraint: query precision ≤ index
-#     precision (see cgeo_text_helpers.sql for why).
+#     the adaptive c_geohash_cover_geometry. Constraint: query max_precision
+#     ≤ index precision (see cgeo_text_helpers.sql for why).
 #
 # This script intentionally mirrors 02_setup_yb_s2.sh and the bench_s2 block
 # of 03_setup_rivers.sh as closely as possible, so any latency delta between
@@ -97,16 +97,13 @@ UPDATE my_mapdata
 SQL
 
 echo "[yb-cgeo] building c_geohash mapping table for POIs (level 10)..."
-# A Point's bbox-cover at level 10 is exactly one cell, so this is one row
-# per POI. The level-10 string is already 10 chars; rpad is a no-op but
-# kept explicit for parity with the rivers path below.
+# A Point at level 10 has exactly one cell. c_geohash_encode(lat, lon, 10)
+# returns that 10-char string directly, no rpad needed.
 "${CGEO_PSQL[@]}" <<SQL
 ALTER TABLE my_mapdata ENABLE TRIGGER trg_cgeo_my_mapdata;
 
 INSERT INTO my_mapdata_cgeo_index (id, geohash)
-SELECT md_pk,
-       rpad((c_geohash_covering(ST_XMin(geom), ST_YMin(geom),
-                                ST_XMax(geom), ST_YMax(geom), 10))[1], 10, '0')
+SELECT md_pk, c_geohash_encode(ST_Y(geom), ST_X(geom), 10)
   FROM my_mapdata
  WHERE geom IS NOT NULL
 ON CONFLICT DO NOTHING;
@@ -139,12 +136,20 @@ ALTER TABLE rivers DISABLE TRIGGER trg_cgeo_rivers;
 
 UPDATE rivers SET geom = ST_GeomFromText(wkt, 4326);
 
+-- For non-point geoms, drive cells from the adaptive coverer with
+-- min_prec=max_prec=5 so every emitted cell is at exactly the storage
+-- level. Each pair's min10 is the cell already right-padded with '0' to
+-- 10 chars, ready to insert.
 INSERT INTO rivers_cgeo_index (id, geohash)
-SELECT r.id, rpad(c.cell, 10, '0')
+SELECT r.id, p.cell
   FROM rivers r,
-       LATERAL unnest(c_geohash_covering(
-         ST_XMin(r.geom), ST_YMin(r.geom),
-         ST_XMax(r.geom), ST_YMax(r.geom), 5)) AS c(cell)
+       LATERAL (
+         SELECT pairs[2 * i - 1] AS cell
+           FROM (
+             SELECT c_geohash_cover_geometry(r.geom, 5, 5, 1000000) AS pairs
+           ) c,
+           generate_series(1, coalesce(array_length(c.pairs, 1), 0) / 2) i
+       ) p
  WHERE r.geom IS NOT NULL
 ON CONFLICT DO NOTHING;
 

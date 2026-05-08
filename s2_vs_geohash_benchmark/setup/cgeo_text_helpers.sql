@@ -11,10 +11,11 @@
 --                    PRIMARY KEY (geohash ASC, id))
 --     We pick a fixed `index_precision` per indexed table (e.g. 10 for points,
 --     5 for lines/polygons) and pad every stored cell to 10 chars with '0'.
---   * Query side: c_geohash_l10_ranges_merged(bbox, query_precision) returns
---     (min10, max10) text pairs. For each pair we issue ONE B-tree range
---     scan via BETWEEN. UNION ALL across pairs (YB lacks BitmapOr; a single
---     OR would degrade to Seq Scan).
+--   * Query side: c_geohash_cover_geometry(geom, min_prec, max_prec,
+--     max_cells) returns (min10, max10) text pairs from the adaptive
+--     top-down coverer. For each pair we issue ONE B-tree range scan via
+--     BETWEEN. UNION ALL across pairs (YB lacks BitmapOr; a single OR
+--     would degrade to Seq Scan).
 --
 -- IMPORTANT precision constraint: query_precision <= index_precision.
 -- Because we right-pad with '0' there is no level marker stored — a coarse
@@ -35,21 +36,16 @@ CREATE OR REPLACE FUNCTION cgeo_text_spatial_candidates(
 LANGUAGE plpgsql AS $$
 DECLARE
     idx_table text := p_table_name || '_cgeo_index';
-    xmin float8;
-    ymin float8;
-    xmax float8;
-    ymax float8;
     pairs text[];
     n int;
     mins text[] := ARRAY[]::text[];
     maxs text[] := ARRAY[]::text[];
 BEGIN
-    xmin := ST_XMin(p_query_geom);
-    ymin := ST_YMin(p_query_geom);
-    xmax := ST_XMax(p_query_geom);
-    ymax := ST_YMax(p_query_geom);
-
-    pairs := c_geohash_l10_ranges_merged(xmin, ymin, xmax, ymax, p_query_precision);
+    -- Adaptive top-down cover from a coarse start (precision 2) down to
+    -- p_query_precision. The output is a list of (min10, max10) text pairs
+    -- ready to drive `WHERE geohash BETWEEN $1 AND $2` range scans.
+    pairs := c_geohash_cover_geometry(p_query_geom, 2, p_query_precision,
+                                      1000000);
     n := coalesce(array_length(pairs, 1), 0);
     IF n = 0 THEN
         RETURN;
@@ -121,9 +117,17 @@ $$;
 
 -- ============================================================================
 -- cgeo_text_auto_index — trigger function (the per-row analog of the bulk
--- INSERT in 04_setup_yb_cgeo.sh). Reads the geom column, computes its bbox
--- via ST_XMin/XMax/YMin/YMax, calls c_geohash_covering(bbox, index_prec),
--- right-pads each cell to 10 chars, inserts into the mapping table.
+-- INSERT in 04_setup_yb_cgeo.sh). Reads the geom column, calls
+-- c_geohash_cover_geometry(geom, idx_prec, idx_prec, max_cells) to get
+-- (min10, max10) pairs at the configured single index precision, and
+-- inserts the min10 string (already right-padded with '0' to 10 chars by
+-- the C coverer) as the indexed cell.
+--
+-- min_prec == max_prec == idx_prec forces every cell at exactly the
+-- storage level — that's the convention the right-pad lex-order indexing
+-- relies on. The adaptive PQ then degenerates into a level-idx_prec cover
+-- that's tighter than the old bbox rasterizer (it actually checks geom
+-- intersection per cell instead of just bbox overlap).
 -- ============================================================================
 CREATE OR REPLACE FUNCTION cgeo_text_auto_index() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -134,9 +138,8 @@ DECLARE
     idx_prec   int  := TG_ARGV[3]::int;
     pk_val     int8;
     g          geometry;
-    cells      text[];
-    pad_len    int;
-    cell_padded text;
+    pairs      text[];
+    n          int;
     sql        text;
 BEGIN
     -- Pull pk + geom out of NEW via dynamic SQL (so the trigger is
@@ -152,23 +155,19 @@ BEGIN
         EXECUTE format('DELETE FROM %I WHERE id = $1', idx_table) USING pk_val;
     END IF;
 
-    cells := c_geohash_covering(
-        ST_XMin(g), ST_YMin(g), ST_XMax(g), ST_YMax(g), idx_prec);
-    IF cells IS NULL OR array_length(cells, 1) IS NULL THEN
+    pairs := c_geohash_cover_geometry(g, idx_prec, idx_prec, 1000000);
+    n := coalesce(array_length(pairs, 1), 0);
+    IF n = 0 THEN
         RETURN NEW;
     END IF;
 
+    -- Each pair is (min10, max10); the min10 string is the cell already
+    -- right-padded to 10 chars with '0', which is exactly what we store.
     sql := format(
         'INSERT INTO %I (id, geohash) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         idx_table);
-    FOR i IN 1..array_length(cells, 1) LOOP
-        pad_len := 10 - length(cells[i]);
-        IF pad_len > 0 THEN
-            cell_padded := cells[i] || repeat('0', pad_len);
-        ELSE
-            cell_padded := cells[i];
-        END IF;
-        EXECUTE sql USING pk_val, cell_padded;
+    FOR i IN 1..(n / 2) LOOP
+        EXECUTE sql USING pk_val, pairs[2 * i - 1];
     END LOOP;
 
     RETURN NEW;
