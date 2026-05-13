@@ -3,10 +3,13 @@
 Plot latency_sweep CSV: four separate PNGs (one chart per file) so each
 is a standalone artifact you can drop into a slide / doc without cropping.
 
-  exec_ms.png        absolute median Execution Time (ms) vs latitude
-  rpcs.png           absolute median Storage Read Requests vs latitude
-  exec_ms_ratio.png  exec_ms ratio vs s2 (gh/s2, qz/s2) — annotated Nx
-  rpcs_ratio.png     RPCs    ratio vs s2 (gh/s2, qz/s2) — annotated Nx
+  exec_ms.png        query execution time (ms) vs latitude, with per-point
+                     ratio-to-s2 annotations on the gh and qz lines
+  rpcs.png           DocDB storage round-trips vs latitude (RPCs), same
+                     ratio annotation idiom
+  exec_ms_ratio.png  ratio-only zoom-in of the execution-time chart
+                     (gh/s2 and qz/s2 lines with Nx labels)
+  rpcs_ratio.png     ratio-only zoom-in of the round-trips chart
 
 Each chart reads the run's metadata.json (next to the CSV) and bakes the
 run parameters (table, shape, envelope size, longitude, engine cover
@@ -181,7 +184,7 @@ def plot_ratio(data, metric_label, title, subtitle, out_path):
         full_title = title + ("\n" + subtitle if subtitle else "")
         ax.set_title(full_title, fontsize=11)
     ax.set_xlabel("Latitude (°)")
-    ax.set_ylabel(f"{metric_label} / s2 {metric_label}  (>1 = engine slower)")
+    ax.set_ylabel(f"Ratio of {metric_label} to S2  (>1 = engine slower than S2)")
     ax.grid(True, linestyle=':', alpha=0.5)
     ax.legend(loc='upper left', fontsize=9)
     fig.tight_layout()
@@ -223,15 +226,17 @@ def main():
     subtitle = subtitle_from_metadata(meta)
 
     out_dir = os.path.dirname(csv_path)
-    plot_absolute(by_exec,  "Median execution time (ms)",
-                  "Wall time vs latitude", subtitle,
+    plot_absolute(by_exec,  "Median query execution time (ms)",
+                  "Query execution time vs latitude", subtitle,
                   os.path.join(out_dir, "exec_ms.png"))
-    plot_absolute(by_reads, "Median storage read requests (RPCs)",
-                  "DocDB round-trips vs latitude", subtitle,
+    plot_absolute(by_reads, "Median storage read requests (DocDB round-trips)",
+                  "DocDB round-trips per query vs latitude", subtitle,
                   os.path.join(out_dir, "rpcs.png"))
-    plot_ratio(by_exec,  "ms",   "Wall-time ratio vs S2", subtitle,
+    plot_ratio(by_exec,  "execution time",
+               "Query execution time relative to S2", subtitle,
                os.path.join(out_dir, "exec_ms_ratio.png"))
-    plot_ratio(by_reads, "RPCs", "RPC-count ratio vs S2", subtitle,
+    plot_ratio(by_reads, "round-trips",
+               "DocDB round-trips relative to S2", subtitle,
                os.path.join(out_dir, "rpcs_ratio.png"))
 
 
