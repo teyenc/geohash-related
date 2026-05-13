@@ -28,7 +28,7 @@ LONGITUDES = [7.0, 31.0, 55.0, 79.0]
 # a lat-lon envelope cos(lat)-corrected so the bounded area stays
 # constant across latitudes — otherwise a fixed deg-by-deg box would
 # shrink toward the pole and hide the distortion we want to measure.
-SIDE_KM = 25
+SIDE_KM = 50
 
 
 # ---- per-script latitude grids -------------------------------------------
