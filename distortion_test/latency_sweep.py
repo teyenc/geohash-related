@@ -248,8 +248,12 @@ def main():
     print(f"[benchmark] {total} queries total: {n_per_db}")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
-    raw_path = os.path.join(OUT_DIR, f"latency_sweep_{ts}.raw.txt")
-    csv_path = os.path.join(OUT_DIR, f"latency_sweep_{ts}.csv")
+    # Bundle every artifact (raw, csv, future plot, summary) for this run
+    # into one per-run subfolder so the top-level results/ dir stays scannable.
+    run_dir  = os.path.join(OUT_DIR, f"run_{ts}")
+    os.makedirs(run_dir, exist_ok=True)
+    raw_path = os.path.join(run_dir, f"latency_sweep_{ts}.raw.txt")
+    csv_path = os.path.join(run_dir, f"latency_sweep_{ts}.csv")
 
     all_rows = []
     raw_acc = ""

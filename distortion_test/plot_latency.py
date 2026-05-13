@@ -46,13 +46,26 @@ def aggregate(rows, metric):
 def main():
     csv_path = sys.argv[1] if len(sys.argv) > 1 else None
     if csv_path is None:
-        candidates = sorted(
-            f for f in os.listdir(RESULTS_DIR)
-            if f.startswith("latency_sweep_") and f.endswith(".csv"))
+        # Look both at the top level (legacy flattened runs) and inside any
+        # run_*/ subfolder (current layout, written by latency_sweep.py).
+        # Sort by basename so the latest timestamp wins regardless of where
+        # the CSV lives.
+        candidates = []
+        for f in os.listdir(RESULTS_DIR):
+            full = os.path.join(RESULTS_DIR, f)
+            if (os.path.isfile(full) and f.startswith("latency_sweep_")
+                    and f.endswith(".csv")):
+                candidates.append(full)
+            elif os.path.isdir(full) and f.startswith("run_"):
+                for sub in os.listdir(full):
+                    if sub.startswith("latency_sweep_") and sub.endswith(".csv"):
+                        candidates.append(os.path.join(full, sub))
         if not candidates:
-            print(f"no latency_sweep_*.csv in {RESULTS_DIR}", file=sys.stderr)
+            print(f"no latency_sweep_*.csv in {RESULTS_DIR} (or its run_*/ subdirs)",
+                  file=sys.stderr)
             sys.exit(1)
-        csv_path = os.path.join(RESULTS_DIR, candidates[-1])
+        candidates.sort(key=os.path.basename)  # sort by CSV filename = ts
+        csv_path = candidates[-1]
     print(f"loading {csv_path}")
 
     rows = load(csv_path)
