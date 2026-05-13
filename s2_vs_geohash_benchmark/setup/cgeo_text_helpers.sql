@@ -7,8 +7,11 @@
 -- int64s, and run BETWEEN range scans on the indexed text column.
 --
 -- Architecture:
---   * Mapping table: <table>_cgeo_index(id int8, geohash text NOT NULL,
---                    PRIMARY KEY (geohash ASC, id))
+--   * Mapping table: <table>_cgeo_index(entry_id int8, geohash text NOT NULL,
+--                    PRIMARY KEY (geohash ASC, entry_id))
+--     Column name `entry_id` matches yb_geospatial_s2's mapping schema
+--     (<table>_s2_index(entry_id, s2_cell)), so distortion-sweep helpers
+--     can use the same SELECT column across both engines.
 --     We pick a fixed `index_precision` per indexed table (e.g. 10 for points,
 --     5 for lines/polygons) and pad every stored cell to 10 chars with '0'.
 --   * Query side: c_geohash_cover_geometry(geom, min_prec, max_prec,
@@ -59,7 +62,7 @@ BEGIN
     END LOOP;
 
     RETURN QUERY EXECUTE format(
-        'SELECT t.id FROM %I t '
+        'SELECT t.entry_id FROM %I t '
         '  JOIN unnest($1::text[], $2::text[]) AS r(rmin, rmax) '
         '    ON t.geohash BETWEEN r.rmin AND r.rmax',
         idx_table
@@ -70,8 +73,8 @@ $$;
 -- ============================================================================
 -- create_cgeo_text_spatial_index('table', 'geom_col', 'pk_col', index_prec)
 --
--- Creates the mapping table <table>_cgeo_index(id, geohash) with PK
--- (geohash ASC, id) so range scans stay inside contiguous tablet slices,
+-- Creates the mapping table <table>_cgeo_index(entry_id, geohash) with PK
+-- (geohash ASC, entry_id) so range scans stay inside contiguous tablet slices,
 -- plus an INSERT/UPDATE trigger that auto-populates the mapping by
 -- bbox-covering the row geometry at `index_prec` and right-padding to 10.
 --
@@ -92,14 +95,14 @@ DECLARE
 BEGIN
     EXECUTE format(
         'CREATE TABLE IF NOT EXISTS %I (
-            id      int8 NOT NULL,
-            geohash text NOT NULL,
-            PRIMARY KEY (geohash ASC, id)
+            entry_id int8 NOT NULL,
+            geohash  text NOT NULL,
+            PRIMARY KEY (geohash ASC, entry_id)
         )', idx_table
     );
     EXECUTE format(
-        'CREATE INDEX IF NOT EXISTS %I ON %I (id)',
-        idx_table || '_by_id', idx_table
+        'CREATE INDEX IF NOT EXISTS %I ON %I (entry_id)',
+        idx_table || '_by_entry_id', idx_table
     );
     EXECUTE format('DROP TRIGGER IF EXISTS trg_cgeo_%I ON %I',
                    p_table_name, p_table_name);
@@ -150,9 +153,9 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- On UPDATE, clear the old mapping rows for this id first.
+    -- On UPDATE, clear the old mapping rows for this entry_id first.
     IF TG_OP = 'UPDATE' THEN
-        EXECUTE format('DELETE FROM %I WHERE id = $1', idx_table) USING pk_val;
+        EXECUTE format('DELETE FROM %I WHERE entry_id = $1', idx_table) USING pk_val;
     END IF;
 
     pairs := c_geohash_cover_geometry(g, idx_prec, idx_prec, 1000000);
@@ -164,7 +167,7 @@ BEGIN
     -- Each pair is (min10, max10); the min10 string is the cell already
     -- right-padded to 10 chars with '0', which is exactly what we store.
     sql := format(
-        'INSERT INTO %I (id, geohash) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        'INSERT INTO %I (entry_id, geohash) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         idx_table);
     FOR i IN 1..(n / 2) LOOP
         EXECUTE sql USING pk_val, pairs[2 * i - 1];

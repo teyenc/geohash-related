@@ -13,6 +13,24 @@ DATA_PIPE="$DANS_SQL/19_mapData.pipe"
 
 PSQL=( "$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -v ON_ERROR_STOP=1 -X )
 
+# ---- early-out if bench_dans is already fully loaded ------------------------
+# Skip the destructive DROP DATABASE + reload (~90s) when bench_dans exists,
+# my_mapdata holds the full 344688 rows, AND the LEFT(geo_hash10,6) expr index
+# is present. Any probe failure (cluster down, DB missing, count mismatch)
+# falls through to the destructive path below.
+already_loaded() {
+    local out
+    out=$("$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -d bench_dans -tA \
+            -c "SELECT (SELECT count(*) FROM my_mapdata) || '|' ||
+                       (SELECT count(*) FROM pg_class
+                         WHERE relname='my_mapdata_left_gh6_idx')" 2>/dev/null) || return 1
+    [ "$out" = "344688|1" ]
+}
+if already_loaded; then
+    echo "[yb-dans] bench_dans already loaded (my_mapdata=344688, LEFT(gh6) idx present) -- skipping rebuild."
+    exit 0
+fi
+
 echo "[yb-dans] dropping + recreating bench_dans"
 "${PSQL[@]}" -d yugabyte <<SQL
 DROP DATABASE IF EXISTS bench_dans;
@@ -48,6 +66,13 @@ UPDATE my_mapdata
 UPDATE my_mapdata
    SET geo_hash8 = LEFT(geo_hash10, 8)
  WHERE geo_hash10 IS NOT NULL;
+
+-- LEFT(geo_hash10, 6) expression index for the distortion-sweep pure-SQL
+-- path (LEFT(geo_hash10, 6) = ANY(geohash_cells_for_bbox(...))). Without
+-- this the candidate scan reduces to a 344K seq-scan; with it, the bucketed
+-- prefix lookup costs only a handful of cells per envelope.
+CREATE INDEX IF NOT EXISTS my_mapdata_left_gh6_idx
+    ON my_mapdata (LEFT(geo_hash10, 6) ASC);
 SQL
 
 "${DANS_PSQL[@]}" -c "SELECT count(*) AS rows FROM my_mapdata;"

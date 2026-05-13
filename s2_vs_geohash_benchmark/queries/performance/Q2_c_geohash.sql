@@ -5,7 +5,7 @@
 -- exact 50 km circle; the cgeo_text_spatial_candidates pre-filter restricts
 -- candidates to the ~50 km lat/lon-padded bbox cover.
 --
--- Storage: my_mapdata_cgeo_index(id, geohash) at index_prec=10.
+-- Storage: my_mapdata_cgeo_index(entry_id, geohash) at index_prec=10.
 -- Query precision: 6 (~1.2 km × 600 m cells). 6 ≤ 10 so any L10 stored
 -- cell falls within a (min10, max10) range padded from a level-6 prefix.
 --

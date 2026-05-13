@@ -206,7 +206,7 @@ fi
 # ============================================================================
 # Stage 7: create the three benchmark databases + load data
 # ============================================================================
-log "Stage 7/8: creating bench_postgis, bench_dans, bench_s2 + loading data"
+log "Stage 7/8: creating bench_postgis, bench_dans, bench_s2, bench_cgeo + loading data"
 
 cd "$BENCH_ROOT"
 log "  [postgis] fresh local PG15 cluster on :$PG_PORT + 344K POIs + GiST"
@@ -218,7 +218,12 @@ log "  [dans]    creating bench_dans in YB + Dan's SQL + 344K POIs (~90s)"
 log "  [s2]      creating bench_s2 in YB + yb_geospatial_s2 + 344K POIs (~60s)"
 ./setup/02_setup_yb_s2.sh
 
-log "  [rivers]  generating 5K synthetic rivers + loading into all 3 DBs"
+log "  [cgeo]    creating bench_cgeo in YB + c_geohash + 344K POIs (~60s)"
+./setup/04_setup_yb_cgeo.sh
+
+# 03 must run AFTER 04 because it now also loads rivers into bench_cgeo
+# (which requires the c_geohash extension to already be installed there).
+log "  [rivers]  generating 100K synthetic rivers + loading into all 4 DBs"
 ./setup/03_setup_rivers.sh
 
 # ============================================================================

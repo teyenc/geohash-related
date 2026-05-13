@@ -2,38 +2,61 @@
 # ============================================================================
 # 04_setup_yb_cgeo.sh
 #
-# Creates YB database `bench_cgeo`, installs yb_geospatial_s2 (for the
-# `geometry` type only — bench_cgeo uses the SAME on-disk EWKB layout as
-# bench_s2) and c_geohash (the prefix-indexing extension under test, now
-# text-API only). Loads 344K POI rows + 100K rivers and builds the c_geohash
-# mapping tables in bulk.
+# Creates YB database `bench_cgeo`, installs c_geohash (the prefix-indexing
+# extension under test, text-API only — provides its own `geometry` type and
+# ST_* surface, no dependency on yb_geospatial_s2). Loads only the 344K POI
+# rows and builds the c_geohash mapping table for POIs.
+#
+# Rivers are loaded by 03_setup_rivers.sh (along with bench_postgis /
+# bench_dans / bench_s2), so this script must run BEFORE 03.
 #
 # Storage model (text API):
-#   * <table>_cgeo_index(id int8, geohash text NOT NULL,
-#                        PRIMARY KEY (geohash ASC, id))
+#   * <table>_cgeo_index(entry_id int8, geohash text NOT NULL,
+#                        PRIMARY KEY (geohash ASC, entry_id))
+#     `entry_id` matches the column name yb_geospatial_s2 uses for its
+#     <table>_s2_index mapping, so the two engines have a unified schema.
 #   * Cells are stored as canonical base-32 geohash strings right-padded to
 #     10 chars. Index precision is per-table:
 #       - my_mapdata (Points)           : level 10  (~1 m × 0.6 m, 1 cell/row)
-#       - rivers     (LineStrings)      : level 5   (~5 km × 5 km, ≤ ~225 cells
-#                                                    per ~75 km river bbox)
+#       - rivers     (LineStrings)      : level 5   (~5 km × 5 km, set up in 03)
 #   * Query side issues `BETWEEN min10 AND max10` per (min10, max10) pair from
 #     the adaptive c_geohash_cover_geometry. Constraint: query max_precision
 #     ≤ index precision (see cgeo_text_helpers.sql for why).
 #
-# This script intentionally mirrors 02_setup_yb_s2.sh and the bench_s2 block
-# of 03_setup_rivers.sh as closely as possible, so any latency delta between
-# the two engines is attributable to the cell-encoding (S2 vs. geohash) and
-# not to schema or load-pattern differences.
+# This script intentionally mirrors 02_setup_yb_s2.sh so any latency delta
+# between the two engines is attributable to the cell-encoding (S2 vs.
+# geohash) and not to schema or load-pattern differences.
 # ============================================================================
 set -euo pipefail
 
 YB_BIN=/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin
 ROOT=$(cd "$(dirname "$0")"/..; pwd)
 DATA_PIPE="/net/dev-server-te-yenchou/share/code/geohash-related/geospatial_demo/data/19_mapData.pipe"
-RIVERS_DATA="$ROOT/data/rivers.csv"
 HELPERS_SQL="$ROOT/setup/cgeo_text_helpers.sql"
 
 PSQL=( "$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -v ON_ERROR_STOP=1 -X )
+
+# ---- early-out if bench_cgeo is already fully loaded ------------------------
+# Skip the destructive DROP DATABASE + reload (~60s) when bench_cgeo exists
+# with:
+#   * my_mapdata.count = 344688
+#   * my_mapdata_cgeo_index populated
+#   * my_mapdata_cgeo_index_by_entry_id secondary index present (used by the
+#     auto-fill trigger's reverse lookup on UPDATE/DELETE)
+# Any failure falls through to the destructive path below.
+already_loaded() {
+    local out
+    out=$("$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -d bench_cgeo -tA \
+            -c "SELECT (SELECT count(*) FROM my_mapdata) || '|' ||
+                       (SELECT (count(*) > 0)::int FROM my_mapdata_cgeo_index) || '|' ||
+                       (SELECT count(*) FROM pg_class
+                         WHERE relname='my_mapdata_cgeo_index_by_entry_id')" 2>/dev/null) || return 1
+    [ "$out" = "344688|1|1" ]
+}
+if already_loaded; then
+    echo "[yb-cgeo] bench_cgeo already loaded (my_mapdata=344688, cgeo mapping filled, secondary idx present) -- skipping rebuild."
+    exit 0
+fi
 
 echo "[yb-cgeo] dropping + recreating bench_cgeo"
 "${PSQL[@]}" -d yugabyte <<SQL
@@ -43,12 +66,12 @@ SQL
 
 CGEO_PSQL=( "$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -v ON_ERROR_STOP=1 -X -d bench_cgeo )
 
-echo "[yb-cgeo] installing extensions and helpers..."
+echo "[yb-cgeo] installing extension + helpers..."
 "${CGEO_PSQL[@]}" <<SQL
--- yb_geospatial_s2 supplies the geometry type + ST_GeomFromText etc.
--- (YB has no PostGIS, so we share the type with bench_s2.) c_geohash
--- itself no longer depends on it.
-CREATE EXTENSION yb_geospatial_s2;
+-- c_geohash is standalone: it registers its own geometry type plus the
+-- ST_GeomFromText / ST_X / ST_Y / ST_MakeEnvelope surface this script uses
+-- below. No yb_geospatial_s2 needed (and the two cannot coexist because both
+-- would try to install the same `geometry` type into the same DB).
 CREATE EXTENSION c_geohash;
 SQL
 "${CGEO_PSQL[@]}" -f "$HELPERS_SQL"
@@ -102,68 +125,17 @@ echo "[yb-cgeo] building c_geohash mapping table for POIs (level 10)..."
 "${CGEO_PSQL[@]}" <<SQL
 ALTER TABLE my_mapdata ENABLE TRIGGER trg_cgeo_my_mapdata;
 
-INSERT INTO my_mapdata_cgeo_index (id, geohash)
+INSERT INTO my_mapdata_cgeo_index (entry_id, geohash)
 SELECT md_pk, c_geohash_encode(ST_Y(geom), ST_X(geom), 10)
   FROM my_mapdata
  WHERE geom IS NOT NULL
 ON CONFLICT DO NOTHING;
 SQL
 
-# ---------- Rivers ----------
-if [ ! -s "$RIVERS_DATA" ]; then
-  echo "[yb-cgeo] generating $RIVERS_DATA"
-  mkdir -p "$(dirname "$RIVERS_DATA")"
-  python3 "$ROOT/setup/gen_rivers.py" > "$RIVERS_DATA"
-fi
-
-echo "[yb-cgeo] loading 100K rivers (index_prec=5)..."
-"${CGEO_PSQL[@]}" <<SQL
-DROP TABLE IF EXISTS rivers CASCADE;
-CREATE TABLE rivers (
-  id   BIGINT PRIMARY KEY,
-  name TEXT,
-  wkt  TEXT,
-  geom geometry
-);
-
--- Rivers: index at level 5 (~5 km cells). A 75 km river bbox fans out to
--- O((75/5)^2) ≈ 225 cells worst case; in practice rivers cluster near the
--- diagonal so it averages much less.
-SELECT create_cgeo_text_spatial_index('rivers', 'geom', 'id', 5);
-ALTER TABLE rivers DISABLE TRIGGER trg_cgeo_rivers;
-
-\\copy rivers(id, name, wkt) FROM PROGRAM 'awk -F"|" ''NR > 1 {print \$1 "|" \$2 "|" \$3}'' $RIVERS_DATA' WITH (FORMAT csv, DELIMITER '|')
-
-UPDATE rivers SET geom = ST_GeomFromText(wkt, 4326);
-
--- For non-point geoms, drive cells from the adaptive coverer with
--- min_prec=max_prec=5 so every emitted cell is at exactly the storage
--- level. Each pair's min10 is the cell already right-padded with '0' to
--- 10 chars, ready to insert.
-INSERT INTO rivers_cgeo_index (id, geohash)
-SELECT r.id, p.cell
-  FROM rivers r,
-       LATERAL (
-         SELECT pairs[2 * i - 1] AS cell
-           FROM (
-             SELECT c_geohash_cover_geometry(r.geom, 5, 5, 1000000) AS pairs
-           ) c,
-           generate_series(1, coalesce(array_length(c.pairs, 1), 0) / 2) i
-       ) p
- WHERE r.geom IS NOT NULL
-ON CONFLICT DO NOTHING;
-
-ALTER TABLE rivers ENABLE TRIGGER trg_cgeo_rivers;
-SQL
-
-echo "[yb-cgeo] row counts:"
+echo "[yb-cgeo] row counts (POIs only — rivers are loaded by 03_setup_rivers.sh):"
 "${CGEO_PSQL[@]}" <<SQL
 SELECT 'my_mapdata'             AS tbl, count(*) AS n FROM my_mapdata
 UNION ALL
-SELECT 'my_mapdata_cgeo_index',         count(*)      FROM my_mapdata_cgeo_index
-UNION ALL
-SELECT 'rivers',                        count(*)      FROM rivers
-UNION ALL
-SELECT 'rivers_cgeo_index',             count(*)      FROM rivers_cgeo_index;
+SELECT 'my_mapdata_cgeo_index',         count(*)      FROM my_mapdata_cgeo_index;
 SQL
 echo "[yb-cgeo] done."

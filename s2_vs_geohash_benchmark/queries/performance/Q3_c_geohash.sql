@@ -3,7 +3,7 @@
 -- Same shape as Q3_s2.sql; explicit cgeo_text_spatial_candidates injection.
 -- Polygon recheck via ST_Intersects (GEOS).
 --
--- Storage: my_mapdata_cgeo_index(id, geohash) at index_prec=10.
+-- Storage: my_mapdata_cgeo_index(entry_id, geohash) at index_prec=10.
 -- Query precision: 5 (~5 km × 5 km cells). 5 ≤ 10. The ~200 km box covers
 -- ~40 × 40 = 1 600 leaf cells before merging; the prefix-merge collapses
 -- interior 32-tuples so the actual range count is much smaller.

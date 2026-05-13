@@ -10,16 +10,16 @@ SELECT md_pk, md_name, md_city, ST_AsText(geom) AS geom
 
 \echo ''
 \echo '--- 5 rows from the POI S2 mapping table (one row per POI covering cell):'
-SELECT id, s2_cell
+SELECT entry_id, s2_cell
   FROM my_mapdata_s2_index
  LIMIT 5;
 
 \echo ''
 \echo '--- 3 rivers + how many mapping-table rows each one writes (~8 per river):'
-SELECT id, count(*) AS cells_per_river
+SELECT entry_id, count(*) AS cells_per_river
   FROM rivers_s2_index
- GROUP BY id
- ORDER BY id
+ GROUP BY entry_id
+ ORDER BY entry_id
  LIMIT 3;
 
 \echo ''

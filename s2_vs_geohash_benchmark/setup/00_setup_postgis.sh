@@ -18,6 +18,25 @@ DATA_PIPE="/net/dev-server-te-yenchou/share/code/geospatial_v05/20 - sql/19_mapD
 
 mkdir -p "$BENCH_ROOT/results"
 
+# ---- 0a. early-out if bench_postgis is already fully loaded -----------------
+# Skip the full rebuild (stop+initdb+start+drop+reload, ~30s) when the cluster
+# is already running, bench_postgis exists with all 344688 POIs, AND the GiST
+# index is in place. Connection failure / missing DB / wrong count all return
+# 1 from the probe and fall through to the destructive path below.
+already_loaded() {
+    local out
+    out=$("$PG_BIN/psql" -h 127.0.0.1 -p "$PG_PORT" -d bench_postgis -tA \
+            -c "SELECT (SELECT count(*) FROM my_mapdata) || '|' ||
+                       (SELECT count(*) FROM pg_class
+                         WHERE relname='ix_my_mapdata_geom_gist')" 2>/dev/null) || return 1
+    [ "$out" = "344688|1" ]
+}
+if already_loaded; then
+    echo "[pg] bench_postgis already loaded (my_mapdata=344688, GiST index present) -- skipping rebuild."
+    echo "[pg] connect: $PG_BIN/psql -h 127.0.0.1 -p $PG_PORT -d bench_postgis"
+    exit 0
+fi
+
 # ---- 0. clear any stale listener on the target port ----
 # If a previous run left a postmaster alive (or the user wiped pg_data while
 # the old postgres was still running), pg_ctl start would fail with

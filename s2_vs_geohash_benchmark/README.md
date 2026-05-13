@@ -178,10 +178,10 @@ ORDER BY dist_m LIMIT 10;
 
 ```sql
 -- repeated for each of the N cells returned by ST_S2Covering:
-SELECT id FROM my_mapdata_s2_index
+SELECT entry_id FROM my_mapdata_s2_index
  WHERE s2_cell BETWEEN <range_min_i> AND <range_max_i>   -- descendants
 UNION ALL
-SELECT id FROM my_mapdata_s2_index
+SELECT entry_id FROM my_mapdata_s2_index
  WHERE s2_cell = ANY (<ancestors_i>)                      -- ancestors
 ```
 
@@ -340,7 +340,7 @@ SELECT count(*) FROM rivers
    AND ST_Intersects(geom, ST_MakeEnvelope(-124.4, 32.5, -114.1, 42.0, 4326));
 ```
 
-What's different from Q1–Q3: when we inserted rivers, the `trg_s2_rivers` trigger called `ST_S2Covering(river_geom, 10, 20)` for each row and wrote ~8 `(river_id, s2_cell)` rows into `rivers_s2_index`. Total mapping size: **39,604 rows for 5,000 rivers** (~8 cells/row).
+What's different from Q1–Q3: when we inserted rivers, the `trg_s2_rivers` trigger called `ST_S2Covering(river_geom, 10, 20)` for each row and wrote ~8 `(entry_id, s2_cell)` rows into `rivers_s2_index`. Total mapping size: **39,604 rows for 5,000 rivers** (~8 cells/row).
 
 At query time `spatial_candidates('rivers', CA_envelope)` runs the same 8 `BETWEEN` scans + 8 ancestor probes we saw for point queries — **the mapping table pattern works identically for LineStrings**. The trigger + coverer did the work of "line knows which cells it touches" once at insert time, and the index probe at query time is no different from a point query.
 
