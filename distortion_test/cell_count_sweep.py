@@ -53,6 +53,7 @@ import subprocess
 import sys
 
 from sweep_config import CELL_COUNT_LATITUDES as LATITUDES, LONGITUDES, SIDE_KM
+from sweep_metadata import write_metadata
 
 YB_BIN = "/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin"
 YSQL = os.path.join(YB_BIN, "ysqlsh")
@@ -267,6 +268,21 @@ def main():
             s2_m = statistics.median(per_lat_s2[lat]) if per_lat_s2[lat] else 0
             cells += [f"{s2_m:.0f}", f"{s2_m/s2_baseline:.2f}x"]
         print("| " + " | ".join(f"{c:>8}" for c in cells) + " |")
+
+    # Record what this run was: which engines, sample grid, level ranges, etc.
+    engines_run = [e for e, on in [('gh', do_gh), ('qz', do_qz), ('s2', do_s2)] if on]
+    write_metadata(
+        run_dir=run_dir,
+        script="cell_count_sweep.py",
+        shape='box',          # cell_count always uses envelope-as-input
+        engines=engines_run,
+        latitudes=LATITUDES,
+        longitudes=LONGITUDES,
+        side_km=SIDE_KM,
+        radius_km=None,
+        kind='cell_count',
+        csv_filename=os.path.basename(csv_path),
+    )
 
     # Auto-plot: pipe the freshly-written CSV into plot_cell_count.py so
     # cells_vs_lat.png / growth_vs_lat.png / ratio_vs_lat.png land in the

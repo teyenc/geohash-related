@@ -49,8 +49,9 @@ import subprocess
 import sys
 import time
 
-from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES
+from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES, SIDE_KM
 from sweep_queries import builders_for_shape, RADIUS_KM
+from sweep_metadata import write_metadata
 
 YSQL = "/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin/ysqlsh"
 HOST = "127.0.0.1"
@@ -295,6 +296,27 @@ def main():
             ct = statistics.median(d['count']) if d['count'] else 0
             print(f"{sys_name:<11}{lat:<5}{em:>13.1f}{sr:>11.0f}"
                   f"{ct:>11.0f}{len(d['exec_ms']):>5}")
+
+    # Record what this run was: shape, sample grid, engine params, etc.
+    # Lives next to the CSV so anyone reading the data later can answer
+    # "what was the envelope size / engine config / shape" without digging
+    # into the script source as it was at the time of the run.
+    write_metadata(
+        run_dir=run_dir,
+        script="latency_sweep.py",
+        shape=args.shape,
+        engines=SYSTEMS,
+        latitudes=LATITUDES,
+        longitudes=LONGITUDES,
+        side_km=SIDE_KM,
+        radius_km=(RADIUS_KM if args.shape == 'circle' else None),
+        kind='latency',
+        warmup_runs=WARMUP_RUNS,
+        measured_runs=MEASURED_RUNS,
+        queries_total=total,
+        csv_filename=os.path.basename(csv_path),
+        raw_filename=os.path.basename(raw_path),
+    )
 
     # Auto-plot: pipe the freshly-written CSV into plot_latency.py so the
     # 3-panel chart (ms / RPCs / ratio-vs-s2) lands in the same run folder.
