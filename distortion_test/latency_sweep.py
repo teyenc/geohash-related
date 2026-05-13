@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Latency + RPC sweep across (system, latitude, longitude). Three databases,
+Latency + RPC sweep across (system, latitude, longitude). Four databases,
 each engine in its native DB so the two extensions never coexist:
 
   bench_dans : Dan's pure-SQL geohash helpers + my_mapdata (geo_hash10
@@ -9,11 +9,26 @@ each engine in its native DB so the two extensions never coexist:
 
   bench_cgeo : c_geohash standalone (its own geometry type + ST_* surface) +
                my_mapdata_cgeo_index mapping table.
-                 c_geohash -- md_pk IN (SELECT cgeo_text_spatial_candidates(...))
+                 c_geohash -- (32-ary tree, Z-order curve)
+                 md_pk IN (SELECT cgeo_text_spatial_candidates(...))
+
+  bench_qz   : c_quadtree_z + c_geohash (for geometry type) +
+               my_mapdata_qz_index mapping table + qz_text_spatial_candidates
+               (installed by 05_setup_yb_qz.sh).
+                 qz        -- (4-ary tree, Z-order curve)
+                 md_pk IN (SELECT qz_text_spatial_candidates(...))
 
   bench_s2   : yb_geospatial_s2 + my_mapdata_s2_index + spatial_candidates_v2
                (parameterized cover, installed by 02_setup_yb_s2.sh).
-                 s2        -- md_pk IN (SELECT spatial_candidates_v2(...))
+                 s2        -- (4-ary tree, Hilbert curve)
+                 md_pk IN (SELECT spatial_candidates_v2(...))
+
+The four-way comparison isolates two independent variables:
+  gh vs qz  : branching factor (32-ary vs 4-ary), same Z-order curve
+  qz vs s2  : space-filling curve (Z-order vs Hilbert), same 4-ary tree
+This is exactly the experiment the Moon-Jagadish-Faloutsos-Saltz paper
+predicts a ~43-48% cluster-count reduction for (qz_clusters / s2_clusters
+should land near 1.85 for matched-leaf-size queries).
 
 All three DBs are seeded from the same 19_mapData.pipe file via \\copy, so
 row contents are identical; only the index structure differs.
@@ -50,9 +65,17 @@ WARMUP_RUNS    = 1
 MEASURED_RUNS  = 2
 GH_PURE_PREC   = 6      # pure-SQL fixed precision
 GH_ADAPT_MIN   = 2
-GH_ADAPT_MAX   = 7      # user spec: max level 7 for c_geohash
+GH_ADAPT_MAX   = 7      # max level 7 for c_geohash (32-ary, leaf ~152m)
+QZ_ADAPT_MAX   = 18     # max level 18 for c_quadtree_z (4-ary, leaf ~153m × 76m)
+                        # qz-18 cell area ~11.7k m², SMALLER than S2-16's
+                        # ~20.2k m² — picking the smaller side flips the
+                        # cell-size confound so any qz advantage in
+                        # cluster count is purely the Z-vs-Hilbert curve.
+                        # QZ adaptive min is fixed at 5 inside the helper
+                        # function -- that gives ~11° coarse cells, matching
+                        # gh's GH_ADAPT_MIN=2 in coarse cell area.
 S2_ADAPT_MIN   = 10
-S2_ADAPT_MAX   = 16       # user spec: max level 16 for S2
+S2_ADAPT_MAX   = 16     # max level 16 for S2 (4-ary, leaf ~142m globally)
 S2_MAX_CELLS   = 1000000  # unlimited cover budget; let S2 emit as many
                           # adaptive cells as it needs within [10, 16],
                           # mirroring c_geohash's max_cells=1M setting
@@ -60,9 +83,10 @@ S2_MAX_CELLS   = 1000000  # unlimited cover budget; let S2 emit as many
 SYSTEM_DB = {
     'pure_sql':  'bench_dans',
     'c_geohash': 'bench_cgeo',
+    'qz':        'bench_qz',
     's2':        'bench_s2',
 }
-SYSTEMS = ['pure_sql', 'c_geohash', 's2']
+SYSTEMS = ['pure_sql', 'c_geohash', 'qz', 's2']
 SOURCE_TABLE = 'my_mapdata'
 PK_COLUMN    = 'md_pk'
 GH_COLUMN    = 'geo_hash10'
@@ -118,6 +142,21 @@ SELECT count(*) FROM {SOURCE_TABLE}
 """
 
 
+def query_qz(lat, lon):
+    """c_quadtree_z adaptive cover via qz_text_spatial_candidates (installed
+    in bench_qz by 05_setup_yb_qz.sh). Same query shape as c_geohash —
+    the helper is the qz analog of cgeo_text_spatial_candidates."""
+    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
+    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
+    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+SELECT count(*) FROM {SOURCE_TABLE}
+ WHERE {PK_COLUMN} IN (
+         SELECT qz_text_spatial_candidates('{SOURCE_TABLE}', {env}, {QZ_ADAPT_MAX}))
+   AND ST_X(geom) BETWEEN {xmin} AND {xmax}
+   AND ST_Y(geom) BETWEEN {ymin} AND {ymax};
+"""
+
+
 def query_s2(lat, lon):
     """S2 adaptive cover (descendants + ancestors) via spatial_candidates_v2.
     User spec: max_level=16 for S2."""
@@ -137,6 +176,7 @@ SELECT count(*) FROM {SOURCE_TABLE}
 QUERY_BUILDERS = {
     'pure_sql':  query_pure_sql,
     'c_geohash': query_c_geohash,
+    'qz':        query_qz,
     's2':        query_s2,
 }
 
@@ -165,6 +205,13 @@ def preflight():
               (SELECT count(*) FROM pg_proc WHERE proname='cgeo_text_spatial_candidates') AS cgeo_cands,
               (SELECT count(*) FROM my_mapdata) AS rows,
               (SELECT count(*) FROM my_mapdata_cgeo_index) AS cgeo_idx;
+        """,
+        'bench_qz': """
+            SELECT
+              (SELECT count(*) FROM pg_extension WHERE extname='c_quadtree_z') AS qz_ext,
+              (SELECT count(*) FROM pg_proc WHERE proname='qz_text_spatial_candidates') AS qz_cands,
+              (SELECT count(*) FROM my_mapdata) AS rows,
+              (SELECT count(*) FROM my_mapdata_qz_index) AS qz_idx;
         """,
         'bench_s2': """
             SELECT
@@ -246,19 +293,32 @@ def parse_output(text):
 def main():
     global SYSTEMS
     parser = argparse.ArgumentParser(
-        description=("Distortion latency sweep: c_geohash vs S2 across "
-                     "latitudes. Optionally skip the pure_sql baseline."))
+        description=("Distortion latency sweep across latitudes. Default "
+                     "engines: c_geohash, s2 (the main 2-way comparison). "
+                     "Use --with-pure-sql for Dan's pure-SQL baseline, "
+                     "--with-qz for the Hilbert-vs-Z-order isolation."))
     parser.add_argument(
-        '--skip-pure-sql', action='store_true',
-        help=("Drop the pure_sql engine from this run. Useful when you only "
-              "want the c_geohash-vs-S2 distortion picture (which is also "
-              "what plot_latency.py charts), and don't need to re-measure "
-              "Dan's pure-SQL baseline. Also skips touching bench_dans."))
+        '--with-pure-sql', action='store_true',
+        help=("Include the pure_sql (Dan's plpgsql) engine. Off by default "
+              "because the pure_sql baseline isn't part of the current "
+              "distortion comparison and re-measuring it just adds bench_dans "
+              "traffic. Pass this flag if you specifically want the pure_sql "
+              "numbers for a particular report."))
+    parser.add_argument(
+        '--with-qz', action='store_true',
+        help=("Include the qz (c_quadtree_z) engine. Off by default — the "
+              "main comparison is c_geohash vs s2; qz is the auxiliary "
+              "Hilbert-vs-Z-order isolation experiment (4-ary tree + Z curve, "
+              "matches s2's branching factor but uses gh's curve)."))
     args = parser.parse_args()
 
-    if args.skip_pure_sql:
-        SYSTEMS = [s for s in SYSTEMS if s != 'pure_sql']
-        print(f"[config] --skip-pure-sql: running engines = {SYSTEMS}")
+    # Both pure_sql and qz are excluded by default — only include if asked.
+    skips = []
+    if not args.with_pure_sql: skips.append('pure_sql')
+    if not args.with_qz:       skips.append('qz')
+    SYSTEMS = [s for s in SYSTEMS if s not in skips]
+    print(f"[config] running engines = {SYSTEMS}"
+          + (f"   (skipped: {skips})" if skips else ""))
 
     preflight()
 

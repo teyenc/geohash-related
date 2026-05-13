@@ -28,32 +28,41 @@ import matplotlib.pyplot as plt
 def load_and_aggregate(path):
     """Returns sorted list of {lat, gh_med, s2_med, gh_ratio, s2_ratio}."""
     by_lat_gh = defaultdict(list)
+    by_lat_qz = defaultdict(list)
     by_lat_s2 = defaultdict(list)
     with open(path) as f:
         for r in csv.DictReader(f):
             lat = float(r["lat"])
-            # Skip blank cells — a --skip-gh / --skip-s2 run leaves the
-            # corresponding column empty for every row.
+            # Skip blank cells — a --skip-* run leaves the corresponding
+            # column empty. Older CSVs (pre-qz) won't have qz_cells; tolerate.
             if r.get("gh_cells", "").strip():
                 by_lat_gh[lat].append(int(r["gh_cells"]))
+            if r.get("qz_cells", "").strip():
+                by_lat_qz[lat].append(int(r["qz_cells"]))
             if r.get("s2_cells", "").strip():
                 by_lat_s2[lat].append(int(r["s2_cells"]))
-    lats = sorted(set(by_lat_gh.keys()) | set(by_lat_s2.keys()))
+    lats = sorted(set(by_lat_gh.keys()) | set(by_lat_qz.keys())
+                  | set(by_lat_s2.keys()))
 
     gh_baseline = (statistics.median(by_lat_gh[lats[0]])
                    if by_lat_gh.get(lats[0]) else 1) or 1
+    qz_baseline = (statistics.median(by_lat_qz[lats[0]])
+                   if by_lat_qz.get(lats[0]) else 1) or 1
     s2_baseline = (statistics.median(by_lat_s2[lats[0]])
                    if by_lat_s2.get(lats[0]) else 1) or 1
 
     rows = []
     for lat in lats:
         gh_med = statistics.median(by_lat_gh[lat]) if by_lat_gh.get(lat) else None
+        qz_med = statistics.median(by_lat_qz[lat]) if by_lat_qz.get(lat) else None
         s2_med = statistics.median(by_lat_s2[lat]) if by_lat_s2.get(lat) else None
         rows.append({
             "lat":      lat,
             "gh_med":   gh_med,
+            "qz_med":   qz_med,
             "s2_med":   s2_med,
             "gh_ratio": gh_med / gh_baseline if gh_med is not None else None,
+            "qz_ratio": qz_med / qz_baseline if qz_med is not None else None,
             "s2_ratio": s2_med / s2_baseline if s2_med is not None else None,
         })
     return rows
@@ -61,19 +70,24 @@ def load_and_aggregate(path):
 
 def plot_cells_vs_lat(agg, out_path):
     # Build per-engine series, dropping (lat, None) gaps so a partial run
-    # (--skip-gh or --skip-s2) plots cleanly with no missing-data warnings.
+    # (--skip-*) plots cleanly with no missing-data warnings.
     gh_lats = [a["lat"] for a in agg if a["gh_med"] is not None]
     gh_ys   = [a["gh_med"] for a in agg if a["gh_med"] is not None]
+    qz_lats = [a["lat"] for a in agg if a["qz_med"] is not None]
+    qz_ys   = [a["qz_med"] for a in agg if a["qz_med"] is not None]
     s2_lats = [a["lat"] for a in agg if a["s2_med"] is not None]
     s2_ys   = [a["s2_med"] for a in agg if a["s2_med"] is not None]
 
     fig, ax = plt.subplots(figsize=(10, 6))
     if gh_ys:
         ax.plot(gh_lats, gh_ys, marker="o", color="#a50026", linewidth=2.5,
-                label="geohash (precision 7, ~152 m cells)")
+                label="geohash — 32-ary, Z-order (precision 7, ~152 m cells)")
+    if qz_ys:
+        ax.plot(qz_lats, qz_ys, marker="D", color="#f46d43", linewidth=2.5,
+                label="quadtree-Z — 4-ary, Z-order (level 17, ~306×153 m)")
     if s2_ys:
         ax.plot(s2_lats, s2_ys, marker="s", color="#2166ac", linewidth=2.5,
-                label="S2 (level 16, ~142 m cells)")
+                label="S2 — 4-ary, Hilbert (level 16, ~142 m cells)")
     ax.set_xlabel("Latitude (°)")
     ax.set_ylabel("Cells in cover")
     ax.set_title("Cells per query vs latitude\n"
@@ -91,16 +105,21 @@ def plot_cells_vs_lat(agg, out_path):
 def plot_growth_vs_lat(agg, out_path):
     gh_lats = [a["lat"] for a in agg if a["gh_ratio"] is not None]
     gh_ys   = [a["gh_ratio"] for a in agg if a["gh_ratio"] is not None]
+    qz_lats = [a["lat"] for a in agg if a["qz_ratio"] is not None]
+    qz_ys   = [a["qz_ratio"] for a in agg if a["qz_ratio"] is not None]
     s2_lats = [a["lat"] for a in agg if a["s2_ratio"] is not None]
     s2_ys   = [a["s2_ratio"] for a in agg if a["s2_ratio"] is not None]
 
     fig, ax = plt.subplots(figsize=(10, 6))
     if gh_ys:
         ax.plot(gh_lats, gh_ys, marker="o", color="#a50026", linewidth=2.5,
-                label="geohash growth (relative to lat=0)")
+                label="geohash growth (32-ary, Z-order)")
+    if qz_ys:
+        ax.plot(qz_lats, qz_ys, marker="D", color="#f46d43", linewidth=2.5,
+                label="quadtree-Z growth (4-ary, Z-order)")
     if s2_ys:
         ax.plot(s2_lats, s2_ys, marker="s", color="#2166ac", linewidth=2.5,
-                label="S2 growth (relative to lat=0)")
+                label="S2 growth (4-ary, Hilbert)")
     ax.axhline(1.0, color="grey", linewidth=0.5, linestyle=":")
     ax.set_xlabel("Latitude (°)")
     ax.set_ylabel("Cell-count growth ratio  (cells / cells at lat=0)")

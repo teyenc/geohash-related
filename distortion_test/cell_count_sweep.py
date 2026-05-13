@@ -14,19 +14,30 @@ Sister script: latency_sweep.py
 The two share an x-axis (LATITUDES/LONGITUDES/SIDE_KM live in
 sweep_config.py) so their charts can be put side by side.
 
-DB routing (c_geohash and yb_geospatial_s2 no longer coexist in one DB):
-  c_geohash_cover_geometry(...)  -> bench_cgeo
-  ST_S2Covering(...)             -> bench_s2
+DB routing (c_geohash and yb_geospatial_s2 don't coexist in one DB; qz
+piggybacks on c_geohash's geometry type and lives in its own bench_qz):
+  c_geohash_cover_geometry(...)        -> bench_cgeo  (gh side)
+  c_qz_cover_geometry_str(...)         -> bench_qz    (qz side)
+  ST_S2Covering(...)                   -> bench_s2    (s2 side)
 
-Both engines run their adaptive top-down coverer (S2's classic algorithm:
-priority queue + 1-level look-ahead, cells terminate when fully contained
-in the bbox or at max_level). max_cells is effectively unbounded — the
-cap is on the LEAF LEVEL, not the cell budget — so the result is the
-exact minimal merged cover at the matched leaf level.
+All three engines run their adaptive top-down coverer (S2's classic
+algorithm: priority queue + 1-level look-ahead, cells terminate when
+fully contained in the bbox or at max_level). max_cells is effectively
+unbounded — the cap is on the LEAF LEVEL, not the cell budget — so the
+result is the exact minimal merged cover at the matched leaf level.
+
+Three-way comparison:
+  gh   : 32-ary tree, Z-order curve
+  qz   : 4-ary tree,  Z-order curve
+  s2   : 4-ary tree,  Hilbert curve
+gh vs qz isolates branching factor; qz vs s2 isolates the curve. The
+Moon-Jagadish-Faloutsos-Saltz paper predicts qz / s2 ~ 1.85 (i.e. S2
+emits 43-48% fewer cells than QZ) for matched-leaf-size queries.
 
 CLI:
-  --skip-gh    skip the c_geohash side (only measure S2)
-  --skip-s2    skip the S2 side (only measure c_geohash)
+  --skip-gh    skip the c_geohash side
+  --skip-qz    skip the c_quadtree_z side
+  --skip-s2    skip the S2 side
 
 Output:
   * markdown table to stdout (raw per (lat, lon) plus median summary)
@@ -49,22 +60,26 @@ HOST = "127.0.0.1"
 PORT = "5433"
 USER = "yugabyte"
 
-# Two DBs because the two extensions can't coexist (both register the
-# `geometry` type). Each call routes to whichever DB hosts its function.
-GH_DB = "bench_cgeo"   # has c_geohash extension + c_geohash_cover_geometry
-S2_DB = "bench_s2"     # has yb_geospatial_s2 + ST_S2Covering
+# Three DBs because the geometry-providing extensions don't coexist.
+# c_quadtree_z piggybacks on c_geohash's geometry type in bench_qz.
+GH_DB = "bench_cgeo"   # has c_geohash         + c_geohash_cover_geometry
+QZ_DB = "bench_qz"     # has c_quadtree_z      + c_qz_cover_geometry_str
+S2_DB = "bench_s2"     # has yb_geospatial_s2  + ST_S2Covering
 
-# Adaptive coverer level ranges. Both engines subdivide from the coarse
-# min level down to a leaf level chosen so cells are ~150 m at the
-# equator (apples-to-apples cell size):
-#   gh-7  cells: 0.001373 x 0.001373 deg = 152 m x 152 m at the equator
-#   S2-L16 avg edge ~ 142 m globally
+# Adaptive coverer level ranges. All three engines subdivide from the
+# coarsest sensible level (lots of merge freedom — that's the right
+# intent for measuring distortion-shape) down to a leaf level chosen
+# so cells are ~150 m at the equator (apples-to-apples cell size):
+#   gh-7   : 0.001373° × 0.001373° = 152 m × 152 m at the equator
+#   qz-18  : 0.00137°  × 0.000687° = 153 m × 76 m  at the equator (cell area ~11.7k m²)
+#   S2-L16 : avg edge ~ 142 m globally                        (cell area ~20.2k m²)
 #
-# min_prec/min_level start at the COARSEST sensible level so the adaptive
-# coverer has maximum freedom to merge — that's the right intent for
-# measuring distortion-shape; latency_sweep.py uses a tighter range that
-# matches what's actually indexed at load time.
+# qz-18 cells are SMALLER (in area) than S2-16 — flipping the cell-size
+# confound. Now any qz advantage in cluster count is purely the curve
+# effect (Z-order vs Hilbert). Paper predicts qz / s2 ~ 1.85 at low
+# latitudes for matched leaf size.
 GH_MIN_PREC,   GH_MAX_PREC   = 1, 7
+QZ_MIN_LEVEL,  QZ_MAX_LEVEL  = 1, 18
 S2_MIN_LEVEL,  S2_MAX_LEVEL  = 4, 16
 
 # Effectively unbounded — the LEAF LEVEL caps the cover, not a cell-count
@@ -107,6 +122,16 @@ def gh_cells(lat, lon):
     return int(out) if out else 0
 
 
+def qz_cells(lat, lon):
+    """c_quadtree_z adaptive cover: returns number of (min30, max30) pairs."""
+    mn_lon, mn_lat, mx_lon, mx_lat = rect_bbox_deg(lat, lon, SIDE_KM)
+    sql = (f"SELECT COALESCE(array_length(c_qz_cover_geometry_str("
+           f"ST_MakeEnvelope({mn_lon}, {mn_lat}, {mx_lon}, {mx_lat}, 4326), "
+           f"{QZ_MIN_LEVEL}, {QZ_MAX_LEVEL}, {MAX_CELLS}), 1), 0) / 2;")
+    out = run_one(QZ_DB, sql)
+    return int(out) if out else 0
+
+
 def s2_cells(lat, lon):
     """S2 adaptive cover: returns number of cell IDs emitted."""
     mn_lon, mn_lat, mx_lon, mx_lat = rect_bbox_deg(lat, lon, SIDE_KM)
@@ -119,21 +144,31 @@ def s2_cells(lat, lon):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=("Cell-count sweep across latitudes: c_geohash vs S2 "
-                     "adaptive coverer. Pure geometry, no DB queries."))
+        description=("Cell-count sweep across latitudes. Default engines: "
+                     "c_geohash (gh) and S2 — the main 2-way comparison. "
+                     "Use --with-qz to add the c_quadtree_z side for the "
+                     "Hilbert-vs-Z-order isolation experiment. Pure "
+                     "geometry, no DB queries."))
     parser.add_argument(
         '--skip-gh', action='store_true',
-        help="Skip the c_geohash side (only measure S2).")
+        help="Drop the c_geohash side.")
+    parser.add_argument(
+        '--with-qz', action='store_true',
+        help=("Include the c_quadtree_z (qz) side. Off by default — qz is "
+              "the auxiliary 4-ary-tree + Z-order engine for isolating the "
+              "branching-factor effect against gh (32-ary, also Z-order) "
+              "and the curve effect against s2 (4-ary, Hilbert)."))
     parser.add_argument(
         '--skip-s2', action='store_true',
-        help="Skip the S2 side (only measure c_geohash).")
+        help="Drop the S2 side.")
     args = parser.parse_args()
-    if args.skip_gh and args.skip_s2:
-        print("ERROR: --skip-gh and --skip-s2 together leaves nothing to run.",
+    do_gh = not args.skip_gh
+    do_qz = args.with_qz                 # opt-in
+    do_s2 = not args.skip_s2
+    if not (do_gh or do_qz or do_s2):
+        print("ERROR: skipping all engines leaves nothing to run.",
               file=sys.stderr)
         sys.exit(2)
-    do_gh = not args.skip_gh
-    do_s2 = not args.skip_s2
 
     print("# Cell-count sweep across latitude (with 4-longitude sampling)")
     print(f"# latitudes   : {LATITUDES}    (from sweep_config.py)")
@@ -142,15 +177,20 @@ def main():
     if do_gh:
         print(f"# gh range    : precision {GH_MIN_PREC}..{GH_MAX_PREC} "
               f"(leaf gh-{GH_MAX_PREC} = ~152 m cells at the equator)")
+    if do_qz:
+        print(f"# qz range    : level {QZ_MIN_LEVEL}..{QZ_MAX_LEVEL} "
+              f"(leaf qz-L{QZ_MAX_LEVEL} = ~153 m × 76 m cells at the equator)")
     if do_s2:
         print(f"# S2 range    : level {S2_MIN_LEVEL}..{S2_MAX_LEVEL} "
               f"(leaf S2-L{S2_MAX_LEVEL} = ~142 m cells globally)")
     print(f"# max_cells   : {MAX_CELLS}  (effectively unbounded)")
-    print(f"# engines     : "
-          f"{'gh' if do_gh else ''}"
-          f"{', ' if do_gh and do_s2 else ''}"
-          f"{'s2' if do_s2 else ''}")
+    active = []
+    if do_gh: active.append('gh')
+    if do_qz: active.append('qz')
+    if do_s2: active.append('s2')
+    print(f"# engines     : {', '.join(active)}")
     if do_gh: print(f"# gh DB       : {GH_DB}")
+    if do_qz: print(f"# qz DB       : {QZ_DB}")
     if do_s2: print(f"# s2 DB       : {S2_DB}")
     print()
 
@@ -161,32 +201,37 @@ def main():
     csv_path = os.path.join(run_dir, "cell_count.csv")
     csv_fp = open(csv_path, "w", newline="")
     csv_w = csv.writer(csv_fp)
-    # Always write both columns so the schema is stable across runs;
+    # Always write all three columns so the schema is stable across runs;
     # skipped engines just leave their column blank for that row.
-    csv_w.writerow(["lat", "lon", "gh_cells", "s2_cells"])
+    csv_w.writerow(["lat", "lon", "gh_cells", "qz_cells", "s2_cells"])
     print(f"# CSV -> {csv_path}\n")
 
     cols = ['lat', 'lon']
     if do_gh: cols.append('gh')
+    if do_qz: cols.append('qz')
     if do_s2: cols.append('s2')
     print("| " + " | ".join(f"{c:>5}" for c in cols) + " |")
     print("|" + "|".join(["-"*7]*len(cols)) + "|")
 
     per_lat_gh = {lat: [] for lat in LATITUDES}
+    per_lat_qz = {lat: [] for lat in LATITUDES}
     per_lat_s2 = {lat: [] for lat in LATITUDES}
 
     for lat in LATITUDES:
         for lon in LONGITUDES:
             gh = gh_cells(lat, lon) if do_gh else ''
+            qz = qz_cells(lat, lon) if do_qz else ''
             s2 = s2_cells(lat, lon) if do_s2 else ''
             row_cells = [str(lat) + '°', f"{lon:.1f}"]
             if do_gh: row_cells.append(str(gh))
+            if do_qz: row_cells.append(str(qz))
             if do_s2: row_cells.append(str(s2))
             print("| " + " | ".join(f"{c:>5}" for c in row_cells) + " |",
                   flush=True)
-            csv_w.writerow([lat, lon, gh, s2])
+            csv_w.writerow([lat, lon, gh, qz, s2])
             csv_fp.flush()
             if do_gh: per_lat_gh[lat].append(gh)
+            if do_qz: per_lat_qz[lat].append(qz)
             if do_s2: per_lat_s2[lat].append(s2)
         print("|" + "|".join(["-"*7]*len(cols)) + "|")
 
@@ -198,12 +243,15 @@ def main():
     print("# Summary -- median across longitudes per latitude:\n")
     summary_cols = ['lat']
     if do_gh: summary_cols += ['gh med', 'gh /lat0']
+    if do_qz: summary_cols += ['qz med', 'qz /lat0']
     if do_s2: summary_cols += ['s2 med', 's2 /lat0']
     print("| " + " | ".join(f"{c:>8}" for c in summary_cols) + " |")
     print("|" + "|".join(["-"*10]*len(summary_cols)) + "|")
 
     gh_baseline = (statistics.median(per_lat_gh[LATITUDES[0]])
                    if do_gh and per_lat_gh[LATITUDES[0]] else 1) or 1
+    qz_baseline = (statistics.median(per_lat_qz[LATITUDES[0]])
+                   if do_qz and per_lat_qz[LATITUDES[0]] else 1) or 1
     s2_baseline = (statistics.median(per_lat_s2[LATITUDES[0]])
                    if do_s2 and per_lat_s2[LATITUDES[0]] else 1) or 1
 
@@ -212,6 +260,9 @@ def main():
         if do_gh:
             gh_m = statistics.median(per_lat_gh[lat]) if per_lat_gh[lat] else 0
             cells += [f"{gh_m:.0f}", f"{gh_m/gh_baseline:.2f}x"]
+        if do_qz:
+            qz_m = statistics.median(per_lat_qz[lat]) if per_lat_qz[lat] else 0
+            cells += [f"{qz_m:.0f}", f"{qz_m/qz_baseline:.2f}x"]
         if do_s2:
             s2_m = statistics.median(per_lat_s2[lat]) if per_lat_s2[lat] else 0
             cells += [f"{s2_m:.0f}", f"{s2_m/s2_baseline:.2f}x"]

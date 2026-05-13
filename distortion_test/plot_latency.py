@@ -76,14 +76,15 @@ def main():
 
     # Stable color/marker per system.
     palette = {
-        'c_geohash': ('#d62728', 's'),
-        's2':        ('#2ca02c', '^'),
+        'c_geohash': ('#d62728', 's'),    # 32-ary, Z-order
+        'qz':        ('#f46d43', 'D'),    # 4-ary, Z-order  (isolates branching)
+        's2':        ('#2ca02c', '^'),    # 4-ary, Hilbert  (isolates curve)
     }
     # pure_sql is the demo baseline measured by the perf-bootstrap benchmark,
     # not by this distortion sweep -- it has a fundamentally different shape
     # (1 RPC always, regardless of cell count) so dropping it lets the chart
-    # show the c_geohash-vs-S2 distortion comparison cleanly.
-    sys_order = ['c_geohash', 's2']
+    # show the gh-vs-qz-vs-S2 distortion comparison cleanly.
+    sys_order = ['c_geohash', 'qz', 's2']
 
     for ax, data, title, ylabel in [
         (axA, by_exec,  'Execution Time vs Latitude',     'median ms'),
