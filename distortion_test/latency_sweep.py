@@ -25,6 +25,7 @@ in any DB.
 Per (sys, lat, lon): WARMUP_RUNS discarded + MEASURED_RUNS recorded. Each
 system runs in its own ysqlsh session (one per DB).
 """
+import argparse
 import csv
 import math
 import os
@@ -41,7 +42,7 @@ USER = "yugabyte"
 OUT_DIR = "/net/dev-server-te-yenchou/share/code/geohash-related/distortion_test/results"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-LATITUDES   = [0, 30, 45, 60, 70, 80, 85]
+LATITUDES   = [0, 16, 31, 46, 61, 71, 80, 86]
 LONGITUDES  = [7.0, 31.0, 55.0, 79.0]
 WARMUP_RUNS    = 1
 MEASURED_RUNS  = 2
@@ -172,7 +173,11 @@ def preflight():
               (SELECT count(*) FROM my_mapdata_s2_index) AS s2_idx;
         """,
     }
-    for db in sorted(set(SYSTEM_DB.values())):
+    # Only preflight DBs that one of the currently-selected engines uses
+    # (after any CLI filtering of SYSTEMS). Probing an unused DB is harmless
+    # but noisy, and confusing if it's missing.
+    dbs_in_use = {SYSTEM_DB[s] for s in SYSTEMS}
+    for db in sorted(dbs_in_use):
         print(f"[preflight] {db}:")
         out, _ = run_sql_in(db, checks[db])
         for line in out.strip().splitlines():
@@ -238,9 +243,26 @@ def parse_output(text):
 
 
 def main():
+    global SYSTEMS
+    parser = argparse.ArgumentParser(
+        description=("Distortion latency sweep: c_geohash vs S2 across "
+                     "latitudes. Optionally skip the pure_sql baseline."))
+    parser.add_argument(
+        '--skip-pure-sql', action='store_true',
+        help=("Drop the pure_sql engine from this run. Useful when you only "
+              "want the c_geohash-vs-S2 distortion picture (which is also "
+              "what plot_latency.py charts), and don't need to re-measure "
+              "Dan's pure-SQL baseline. Also skips touching bench_dans."))
+    args = parser.parse_args()
+
+    if args.skip_pure_sql:
+        SYSTEMS = [s for s in SYSTEMS if s != 'pure_sql']
+        print(f"[config] --skip-pure-sql: running engines = {SYSTEMS}")
+
     preflight()
 
-    n_per_db = {db: 0 for db in set(SYSTEM_DB.values())}
+    dbs_in_use = {SYSTEM_DB[s] for s in SYSTEMS}
+    n_per_db = {db: 0 for db in dbs_in_use}
     for s in SYSTEMS:
         n_per_db[SYSTEM_DB[s]] += (len(LATITUDES) * len(LONGITUDES) *
                                     (WARMUP_RUNS + MEASURED_RUNS))
@@ -257,7 +279,7 @@ def main():
 
     all_rows = []
     raw_acc = ""
-    for db in sorted(set(SYSTEM_DB.values())):
+    for db in sorted(dbs_in_use):
         script = build_script_for_db(db)
         sys_in_db = [s for s in SYSTEMS if SYSTEM_DB[s] == db]
         print(f"[{db}] running {len(sys_in_db)} system(s) "
