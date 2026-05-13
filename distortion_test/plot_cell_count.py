@@ -78,7 +78,11 @@ def plot_cells_vs_lat(agg, out_path):
     s2_lats = [a["lat"] for a in agg if a["s2_med"] is not None]
     s2_ys   = [a["s2_med"] for a in agg if a["s2_med"] is not None]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Per-lat lookup of the s2 baseline so we can compute gh/s2 and qz/s2
+    # ratios for inline annotations on the non-s2 lines.
+    s2_by_lat = {a["lat"]: a["s2_med"] for a in agg if a["s2_med"]}
+
+    fig, ax = plt.subplots(figsize=(11, 6.5))
     if gh_ys:
         ax.plot(gh_lats, gh_ys, marker="o", color="#a50026", linewidth=2.5,
                 label="geohash — 32-ary, Z-order (precision 7, ~152 m cells)")
@@ -88,6 +92,30 @@ def plot_cells_vs_lat(agg, out_path):
     if s2_ys:
         ax.plot(s2_lats, s2_ys, marker="s", color="#2166ac", linewidth=2.5,
                 label="S2 — 4-ary, Hilbert (level 16, ~142 m cells)")
+
+    # Annotate gh and qz lines with their ratio to s2 at each data point.
+    # Stride to reduce clutter when there are many latitudes (24 in the
+    # cell_count_sweep grid would otherwise produce overlapping labels).
+    def annotate_ratios(lats, ys, color, dy):
+        if len(lats) > 12:
+            stride = 2
+        elif len(lats) > 6:
+            stride = 1
+        else:
+            stride = 1
+        for i, (x, y) in enumerate(zip(lats, ys)):
+            if i % stride != 0 and i != len(lats) - 1:
+                continue
+            s2_y = s2_by_lat.get(x)
+            if not s2_y:
+                continue
+            ax.annotate(f"{y/s2_y:.1f}×",
+                        xy=(x, y), xytext=(3, dy),
+                        textcoords="offset points",
+                        fontsize=8, color=color, ha="left")
+
+    if gh_ys: annotate_ratios(gh_lats, gh_ys, "#a50026", dy=6)
+    if qz_ys: annotate_ratios(qz_lats, qz_ys, "#f46d43", dy=-12)
     ax.set_xlabel("Latitude (°)")
     ax.set_ylabel("Cells in cover")
     ax.set_title("Cells per query vs latitude\n"

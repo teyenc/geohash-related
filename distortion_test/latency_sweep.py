@@ -337,10 +337,14 @@ def main():
     # Pick any DB we touched; row counts will be identical across them.
     sample_db = next(iter(sorted(dbs_in_use)))
     rows_out, _ = run_sql_in(sample_db, f"SELECT count(*) FROM {args.table}")
-    try:
-        data_rows = int(rows_out.strip().splitlines()[-1])
-    except Exception:
-        data_rows = None
+    # Default ysqlsh output has header/sep/value/(1 row) lines; pick the
+    # numeric one rather than rely on a specific position.
+    data_rows = None
+    for line in rows_out.splitlines():
+        stripped = line.strip()
+        if stripped.isdigit():
+            data_rows = int(stripped)
+            break
     write_metadata(
         run_dir=run_dir,
         script="latency_sweep.py",
