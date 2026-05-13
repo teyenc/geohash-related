@@ -42,7 +42,6 @@ system runs in its own ysqlsh session (one per DB).
 """
 import argparse
 import csv
-import math
 import os
 import re
 import statistics
@@ -50,7 +49,8 @@ import subprocess
 import sys
 import time
 
-from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES, SIDE_KM
+from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES
+from sweep_queries import QUERY_BUILDERS
 
 YSQL = "/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin/ysqlsh"
 HOST = "127.0.0.1"
@@ -61,24 +61,10 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 # LATITUDES, LONGITUDES, SIDE_KM are imported from sweep_config.py so this
 # sweep and cell_count_sweep.py share the same x-axis sampling.
+# QUERY_BUILDERS (and the per-engine cover-level params + envelope helpers)
+# live in sweep_queries.py — edit there if you need to change the SQL.
 WARMUP_RUNS    = 1
 MEASURED_RUNS  = 2
-GH_PURE_PREC   = 6      # pure-SQL fixed precision
-GH_ADAPT_MIN   = 2
-GH_ADAPT_MAX   = 7      # max level 7 for c_geohash (32-ary, leaf ~152m)
-QZ_ADAPT_MAX   = 18     # max level 18 for c_quadtree_z (4-ary, leaf ~153m × 76m)
-                        # qz-18 cell area ~11.7k m², SMALLER than S2-16's
-                        # ~20.2k m² — picking the smaller side flips the
-                        # cell-size confound so any qz advantage in
-                        # cluster count is purely the Z-vs-Hilbert curve.
-                        # QZ adaptive min is fixed at 5 inside the helper
-                        # function -- that gives ~11° coarse cells, matching
-                        # gh's GH_ADAPT_MIN=2 in coarse cell area.
-S2_ADAPT_MIN   = 10
-S2_ADAPT_MAX   = 16     # max level 16 for S2 (4-ary, leaf ~142m globally)
-S2_MAX_CELLS   = 1000000  # unlimited cover budget; let S2 emit as many
-                          # adaptive cells as it needs within [10, 16],
-                          # mirroring c_geohash's max_cells=1M setting
 
 SYSTEM_DB = {
     'pure_sql':  'bench_dans',
@@ -87,98 +73,6 @@ SYSTEM_DB = {
     's2':        'bench_s2',
 }
 SYSTEMS = ['pure_sql', 'c_geohash', 'qz', 's2']
-SOURCE_TABLE = 'my_mapdata'
-PK_COLUMN    = 'md_pk'
-GH_COLUMN    = 'geo_hash10'
-
-
-# ---------------------------------------------------------------------------
-# Geometry helpers
-# ---------------------------------------------------------------------------
-def envelope_coords(lat, lon, side_km=SIDE_KM):
-    """Fixed-area side_km × side_km envelope centered at (lat, lon).
-    Lon span scales with cos(lat) to keep area constant across latitudes."""
-    half_lat_deg = (side_km / 2) / 111.0
-    cos_lat = max(math.cos(math.radians(lat)), 0.001)
-    half_lon_deg = (side_km / 2) / (111.0 * cos_lat)
-    return (lon - half_lon_deg, lat - half_lat_deg,
-            lon + half_lon_deg, lat + half_lat_deg)
-
-
-def envelope_st_makeenvelope(xmin, ymin, xmax, ymax):
-    return f"ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, 4326)"
-
-
-# ---------------------------------------------------------------------------
-# Per-system EXPLAIN-wrapped query builders
-# ---------------------------------------------------------------------------
-def query_pure_sql(lat, lon):
-    """Dan's pure-SQL geohash on my_mapdata. Recheck via ST_X/ST_Y bbox
-    compare (called only on the small candidate set after the LEFT(...)
-    pre-filter narrows it down). No ST_Intersects -> no planner hook."""
-    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
-    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
-SELECT count(*) FROM {SOURCE_TABLE}
- WHERE LEFT({GH_COLUMN}, {GH_PURE_PREC}) = ANY(
-         ARRAY(SELECT * FROM geohash_cells_for_bbox(
-                 {xmin}, {ymin}, {xmax}, {ymax}, {GH_PURE_PREC})))
-   AND ST_X(geom) BETWEEN {xmin} AND {xmax}
-   AND ST_Y(geom) BETWEEN {ymin} AND {ymax};
-"""
-
-
-def query_c_geohash(lat, lon):
-    """c_geohash adaptive cover (descendants only, via the existing
-    cgeo_text_spatial_candidates helper which uses my_mapdata_cgeo_index).
-    User spec: max_precision=7 for c_geohash."""
-    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
-    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
-    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
-SELECT count(*) FROM {SOURCE_TABLE}
- WHERE {PK_COLUMN} IN (
-         SELECT cgeo_text_spatial_candidates('{SOURCE_TABLE}', {env}, {GH_ADAPT_MAX}))
-   AND ST_X(geom) BETWEEN {xmin} AND {xmax}
-   AND ST_Y(geom) BETWEEN {ymin} AND {ymax};
-"""
-
-
-def query_qz(lat, lon):
-    """c_quadtree_z adaptive cover via qz_text_spatial_candidates (installed
-    in bench_qz by 05_setup_yb_qz.sh). Same query shape as c_geohash —
-    the helper is the qz analog of cgeo_text_spatial_candidates."""
-    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
-    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
-    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
-SELECT count(*) FROM {SOURCE_TABLE}
- WHERE {PK_COLUMN} IN (
-         SELECT qz_text_spatial_candidates('{SOURCE_TABLE}', {env}, {QZ_ADAPT_MAX}))
-   AND ST_X(geom) BETWEEN {xmin} AND {xmax}
-   AND ST_Y(geom) BETWEEN {ymin} AND {ymax};
-"""
-
-
-def query_s2(lat, lon):
-    """S2 adaptive cover (descendants + ancestors) via spatial_candidates_v2.
-    User spec: max_level=16 for S2."""
-    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
-    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
-    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
-SELECT count(*) FROM {SOURCE_TABLE}
- WHERE {PK_COLUMN} IN (
-         SELECT spatial_candidates_v2('{SOURCE_TABLE}', {env},
-                                      {S2_ADAPT_MIN}, {S2_ADAPT_MAX},
-                                      {S2_MAX_CELLS}))
-   AND ST_X(geom) BETWEEN {xmin} AND {xmax}
-   AND ST_Y(geom) BETWEEN {ymin} AND {ymax};
-"""
-
-
-QUERY_BUILDERS = {
-    'pure_sql':  query_pure_sql,
-    'c_geohash': query_c_geohash,
-    'qz':        query_qz,
-    's2':        query_s2,
-}
 
 
 # ---------------------------------------------------------------------------
