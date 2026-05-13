@@ -35,6 +35,8 @@ import subprocess
 import sys
 import time
 
+from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES, SIDE_KM
+
 YSQL = "/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin/ysqlsh"
 HOST = "127.0.0.1"
 PORT = "5433"
@@ -42,11 +44,10 @@ USER = "yugabyte"
 OUT_DIR = "/net/dev-server-te-yenchou/share/code/geohash-related/distortion_test/results"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-LATITUDES   = [0, 16, 31, 46, 61, 71, 80, 86]
-LONGITUDES  = [7.0, 31.0, 55.0, 79.0]
+# LATITUDES, LONGITUDES, SIDE_KM are imported from sweep_config.py so this
+# sweep and cell_count_sweep.py share the same x-axis sampling.
 WARMUP_RUNS    = 1
 MEASURED_RUNS  = 2
-SIDE_KM        = 25
 GH_PURE_PREC   = 6      # pure-SQL fixed precision
 GH_ADAPT_MIN   = 2
 GH_ADAPT_MAX   = 7      # user spec: max level 7 for c_geohash
