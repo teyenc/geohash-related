@@ -72,7 +72,7 @@ def main():
     by_exec  = aggregate(rows, 'exec_ms')
     by_reads = aggregate(rows, 'storage_reads')
 
-    fig, (axA, axB) = plt.subplots(1, 2, figsize=(12, 4.5))
+    fig, (axA, axB, axC) = plt.subplots(1, 3, figsize=(17, 4.5))
 
     # Stable color/marker per system.
     palette = {
@@ -86,6 +86,7 @@ def main():
     # show the gh-vs-qz-vs-S2 distortion comparison cleanly.
     sys_order = ['c_geohash', 'qz', 's2']
 
+    # Panels A + B: absolute values
     for ax, data, title, ylabel in [
         (axA, by_exec,  'Execution Time vs Latitude',     'median ms'),
         (axB, by_reads, 'Storage Read Requests vs Latitude', 'median RPCs'),
@@ -103,6 +104,32 @@ def main():
         ax.set_title(title)
         ax.grid(True, linestyle=':', alpha=0.5)
         ax.legend()
+
+    # Panel C: ratio vs s2 (the "how many x more than s2" view).
+    # Uses ms; same shape would emerge from RPCs but ms is what people read.
+    axC.axhline(1.0, color='grey', linewidth=0.8, linestyle='--',
+                label='parity (1×)')
+    if 's2' in by_exec:
+        s2_at = by_exec['s2']
+        for sys_ in sys_order:
+            if sys_ == 's2' or sys_ not in by_exec:
+                continue
+            lats   = sorted(l for l in by_exec[sys_].keys() if l in s2_at)
+            ratios = [by_exec[sys_][l] / s2_at[l] for l in lats]
+            color, marker = palette[sys_]
+            axC.plot(lats, ratios, color=color, marker=marker, linewidth=2,
+                     markersize=7, label=f"{sys_} / s2")
+            # Annotate each point with its "Nx" multiplier so the magnitude
+            # is readable without consulting the y-axis.
+            for x, y in zip(lats, ratios):
+                axC.annotate(f"{y:.1f}×", xy=(x, y), xytext=(4, 4),
+                             textcoords='offset points',
+                             fontsize=8, color=color)
+    axC.set_xlabel('latitude (degrees)')
+    axC.set_ylabel('exec_ms / s2 exec_ms')
+    axC.set_title('Latency ratio vs S2  (>1 = engine slower than s2)')
+    axC.grid(True, linestyle=':', alpha=0.5)
+    axC.legend()
 
     fig.suptitle(f"latency sweep — {os.path.basename(csv_path)}",
                  fontsize=10)

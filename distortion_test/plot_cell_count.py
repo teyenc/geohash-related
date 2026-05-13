@@ -134,6 +134,61 @@ def plot_growth_vs_lat(agg, out_path):
     print(f"  wrote {out_path}")
 
 
+def plot_ratio_vs_lat(agg, out_path):
+    """How many times more cells does gh / qz emit compared to s2 at each lat?
+    Computed pointwise (gh_med / s2_med, qz_med / s2_med). If s2 wasn't run,
+    nothing to compare against -- skip."""
+    gh_lats, gh_ratios, gh_labels = [], [], []
+    qz_lats, qz_ratios, qz_labels = [], [], []
+    for a in agg:
+        if a["s2_med"] is None or a["s2_med"] == 0:
+            continue
+        if a["gh_med"] is not None:
+            r = a["gh_med"] / a["s2_med"]
+            gh_lats.append(a["lat"]); gh_ratios.append(r); gh_labels.append(r)
+        if a["qz_med"] is not None:
+            r = a["qz_med"] / a["s2_med"]
+            qz_lats.append(a["lat"]); qz_ratios.append(r); qz_labels.append(r)
+
+    if not gh_ratios and not qz_ratios:
+        print(f"  (skip {out_path}: no s2 baseline to ratio against)")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    if gh_ratios:
+        ax.plot(gh_lats, gh_ratios, marker="o", color="#a50026", linewidth=2.5,
+                label="geohash / s2  (gh emits N× more cells than s2)")
+    if qz_ratios:
+        ax.plot(qz_lats, qz_ratios, marker="D", color="#f46d43", linewidth=2.5,
+                label="quadtree-Z / s2  (qz emits N× more cells than s2)")
+    ax.axhline(1.0, color="grey", linewidth=0.8, linestyle="--",
+               label="parity (1.0×)")
+
+    # Annotate every other point with the "Nx" multiplier so the reader can
+    # eyeball the magnitude without squinting at the y-axis.
+    def annotate(xs, ys, color):
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            if i % 2 != 0:        # every other point, to reduce clutter
+                continue
+            ax.annotate(f"{y:.1f}×", xy=(x, y), xytext=(4, 4),
+                        textcoords="offset points",
+                        fontsize=8, color=color)
+    if gh_ratios: annotate(gh_lats, gh_ratios, "#a50026")
+    if qz_ratios: annotate(qz_lats, qz_ratios, "#f46d43")
+
+    ax.set_xlabel("Latitude (°)")
+    ax.set_ylabel("Cell-count ratio  (engine cells / s2 cells)")
+    ax.set_title("Cell-count ratio vs S2 across latitude\n"
+                 "(>1 = engine emits more cells than s2 for the same envelope)")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper left")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=130)
+    plt.close(fig)
+    print(f"  wrote {out_path}")
+
+
 def main():
     if len(sys.argv) > 1:
         csv_path = sys.argv[1]
@@ -161,6 +216,7 @@ def main():
     out_dir = os.path.dirname(csv_path)
     plot_cells_vs_lat (agg, os.path.join(out_dir, "cells_vs_lat.png"))
     plot_growth_vs_lat(agg, os.path.join(out_dir, "growth_vs_lat.png"))
+    plot_ratio_vs_lat (agg, os.path.join(out_dir, "ratio_vs_lat.png"))
 
 
 if __name__ == "__main__":
