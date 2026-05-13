@@ -79,6 +79,14 @@ import math
 from sweep_config import SIDE_KM
 
 # ---- table/column constants (same across all engines) ---------------------
+#
+# SOURCE_TABLE is module-level so the latency_sweep harness can rebind it
+# before calling builders (e.g. to 'geo_cities' for global-coverage runs).
+# All four query_*_* / query_circle_*_* functions read it at call time, so
+# the override has to happen before build_script_for_db() runs but after
+# argparse has finished. PK_COLUMN and GH_COLUMN are convention-matched:
+# the geo_cities table uses the same `md_pk` PK so we don't need to switch
+# them, only the table name.
 
 SOURCE_TABLE = 'my_mapdata'
 PK_COLUMN    = 'md_pk'
@@ -183,7 +191,15 @@ SELECT count(*) FROM {SOURCE_TABLE}
 def query_c_geohash(lat, lon):
     """c_geohash adaptive cover via cgeo_text_spatial_candidates (32-ary
     tree, Z-order curve). Helper internally calls c_geohash_cover_geometry,
-    then BETWEEN-scans my_mapdata_cgeo_index for each (min10, max10) pair.
+    then for each cover cell does BOTH:
+      * descendants: BETWEEN range scan on my_mapdata_cgeo_index
+      * ancestors:   = ANY (...) lookup on the same table
+
+    The ancestor walk mirrors s2's spatial_candidates_v2 so the gh/s2
+    per-cell work is apples-to-apples. DO NOT strip the ancestor lookup
+    from the helper as "dead code for point data" — see the long warning
+    comment above cgeo_text_spatial_candidates in
+    yugabyte-db/src/postgres/yb-extensions/c_geohash/c_geohash--1.0.sql .
 
     Plan signature — standard semi-join shape (see module-level comment):
        Aggregate
@@ -210,7 +226,9 @@ SELECT count(*) FROM {SOURCE_TABLE}
 def query_qz(lat, lon):
     """c_quadtree_z adaptive cover via qz_text_spatial_candidates (4-ary
     tree, Z-order curve — the c_geohash branching-factor control).
-    Installed in bench_qz by 05_setup_yb_qz.sh.
+    Installed in bench_qz by 05_setup_yb_qz.sh. Like the gh helper, this
+    does both descendants + ancestors per cover cell — see the warning
+    in 05_setup_yb_qz.sh for why the ancestor walk must stay.
 
     Plan signature — identical to query_c_geohash, only the helper name
     differs (qz_text_spatial_candidates) and the BETWEEN-scan target is

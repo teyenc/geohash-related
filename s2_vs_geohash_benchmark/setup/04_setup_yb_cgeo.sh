@@ -21,7 +21,8 @@
 #       - rivers     (LineStrings)      : level 5   (~5 km × 5 km, set up in 03)
 #   * Query side issues `BETWEEN min10 AND max10` per (min10, max10) pair from
 #     the adaptive c_geohash_cover_geometry. Constraint: query max_precision
-#     ≤ index precision (see cgeo_text_helpers.sql for why).
+#     ≤ index precision (see comments above cgeo_text_spatial_candidates in
+#     src/postgres/yb-extensions/c_geohash/c_geohash--1.0.sql for why).
 #
 # This script intentionally mirrors 02_setup_yb_s2.sh so any latency delta
 # between the two engines is attributable to the cell-encoding (S2 vs.
@@ -32,8 +33,6 @@ set -euo pipefail
 YB_BIN=/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin
 ROOT=$(cd "$(dirname "$0")"/..; pwd)
 DATA_PIPE="/net/dev-server-te-yenchou/share/code/geohash-related/geospatial_demo/data/19_mapData.pipe"
-HELPERS_SQL="$ROOT/setup/cgeo_text_helpers.sql"
-
 PSQL=( "$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -v ON_ERROR_STOP=1 -X )
 
 # ---- early-out if bench_cgeo is already fully loaded ------------------------
@@ -66,15 +65,17 @@ SQL
 
 CGEO_PSQL=( "$YB_BIN/ysqlsh" -h 127.0.0.1 -p 5433 -U yugabyte -v ON_ERROR_STOP=1 -X -d bench_cgeo )
 
-echo "[yb-cgeo] installing extension + helpers..."
+echo "[yb-cgeo] installing extension..."
+# c_geohash is standalone: it registers its own geometry type, the
+# ST_GeomFromText / ST_X / ST_Y / ST_MakeEnvelope surface this script uses
+# below, AND the cgeo_text_spatial_candidates / create_cgeo_text_spatial_index /
+# cgeo_text_auto_index helpers that the planner hook references and the
+# benchmark relies on. Everything is now in the extension SQL — no separate
+# helpers file load needed. (No yb_geospatial_s2 needed either, and the two
+# cannot coexist because both would try to install the same `geometry` type.)
 "${CGEO_PSQL[@]}" <<SQL
--- c_geohash is standalone: it registers its own geometry type plus the
--- ST_GeomFromText / ST_X / ST_Y / ST_MakeEnvelope surface this script uses
--- below. No yb_geospatial_s2 needed (and the two cannot coexist because both
--- would try to install the same `geometry` type into the same DB).
 CREATE EXTENSION c_geohash;
 SQL
-"${CGEO_PSQL[@]}" -f "$HELPERS_SQL"
 
 echo "[yb-cgeo] creating my_mapdata schema (POIs at index_prec=10)..."
 "${CGEO_PSQL[@]}" <<SQL

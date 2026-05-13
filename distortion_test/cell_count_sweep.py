@@ -52,7 +52,11 @@ import statistics
 import subprocess
 import sys
 
-from sweep_config import CELL_COUNT_LATITUDES as LATITUDES, LONGITUDES, SIDE_KM
+from sweep_config import (
+    CELL_COUNT_LATITUDES   as LATITUDES,
+    CELL_COUNT_LONGITUDES  as LONGITUDES,
+    SIDE_KM,
+)
 from sweep_metadata import write_metadata
 
 YB_BIN = "/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin"

@@ -135,10 +135,24 @@ echo "[yb-qz] installing qz_text_spatial_candidates helper..."
 # Parameterized adaptive cover. Same shape as cgeo_text_spatial_candidates
 # (the gh side) and spatial_candidates_v2 (the s2 side): build the cover
 # as (min_path, max_path) text pairs, range-scan the mapping table for
-# each pair, UNION ALL.
+# each pair, AND walk ancestors. UNION ALL.
 #
 # Min level fixed at 5: that gives ~11° × 5.6° coarse cells, matching
-# gh's min_precision=2 in coarse cell area.
+# gh's min_precision=2 in coarse cell area. Storage width: 30 chars
+# (qz path length), base-4 alphabet '0'..'3'.
+#
+# !! IMPORTANT — DO NOT REMOVE THE ANCESTOR WALK !!
+# ----------------------------------------------------------------------------
+# Mirrors the descendants + ancestors structure of s2's spatial_candidates_v2
+# and cgeo_text_spatial_candidates. Without ancestors the per-cell work would
+# be ~half what s2 pays, biasing the qz/s2 latency comparison and confounding
+# the Hilbert-vs-Z-order isolation experiment. For uniform-leaf-storage
+# tables (qz_path computed at level 18 for points) the ancestor ARRAY
+# lookups return zero rows, but the work to look them up is still paid —
+# which is the cost we want measured. See the long comment above
+# cgeo_text_spatial_candidates in
+# src/postgres/yb-extensions/c_geohash/c_geohash--1.0.sql for the full
+# rationale.
 "${QZ_PSQL[@]}" <<'SQL'
 CREATE OR REPLACE FUNCTION qz_text_spatial_candidates(
     p_table_name      text,
@@ -150,25 +164,53 @@ DECLARE
     idx_table text := p_table_name || '_qz_index';
     pairs text[];
     n int;
-    mins text[] := ARRAY[]::text[];
-    maxs text[] := ARRAY[]::text[];
+    min_pad text;
+    max_pad text;
+    cell_level int;
+    cell_prefix text;
+    ancestors text[];
+    j int;
+    la int;
 BEGIN
     pairs := c_qz_cover_geometry_str(p_query_geom, 5, p_query_max_level,
                                      1000000);
-    n := coalesce(array_length(pairs, 1), 0);
-    IF n = 0 THEN
-        RETURN;
-    END IF;
-    FOR i IN 1..(n/2) LOOP
-        mins := mins || pairs[2*i - 1];
-        maxs := maxs || pairs[2*i];
+    n := coalesce(array_length(pairs, 1), 0) / 2;
+
+    FOR i IN 1..n LOOP
+        min_pad := pairs[2 * i - 1];
+        max_pad := pairs[2 * i];
+
+        -- Recover the cover cell's level from the (min30, max30) pair.
+        -- The strings share a common prefix equal to the cell encoding;
+        -- the first differing char position is the level.
+        cell_level := 30;
+        FOR j IN 1..30 LOOP
+            IF substring(min_pad FROM j FOR 1) <> substring(max_pad FROM j FOR 1) THEN
+                cell_level := j - 1;
+                EXIT;
+            END IF;
+        END LOOP;
+        cell_prefix := substring(min_pad FROM 1 FOR cell_level);
+
+        -- Ancestors: coarser-level cells this cover cell sits inside,
+        -- right-padded with '0' to 30 chars (the storage column width).
+        -- la=1 is the coarsest qz level (4 cells covering Earth).
+        ancestors := ARRAY[]::text[];
+        IF cell_level > 1 THEN
+            FOR la IN 1..(cell_level - 1) LOOP
+                ancestors := ancestors ||
+                             (substring(cell_prefix FROM 1 FOR la) ||
+                              repeat('0', 30 - la));
+            END LOOP;
+        END IF;
+
+        RETURN QUERY EXECUTE format(
+            'SELECT entry_id FROM %I WHERE qz_path BETWEEN $1 AND $2 '
+            'UNION ALL '
+            'SELECT entry_id FROM %I WHERE qz_path = ANY($3)',
+            idx_table, idx_table)
+        USING min_pad, max_pad, ancestors;
     END LOOP;
-    RETURN QUERY EXECUTE format(
-        'SELECT t.entry_id FROM %I t '
-        '  JOIN unnest($1::text[], $2::text[]) AS r(rmin, rmax) '
-        '    ON t.qz_path BETWEEN r.rmin AND r.rmax',
-        idx_table
-    ) USING mins, maxs;
 END;
 $$;
 SQL

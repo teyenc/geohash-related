@@ -49,7 +49,12 @@ import subprocess
 import sys
 import time
 
-from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES, SIDE_KM
+from sweep_config import (
+    LATENCY_LATITUDES   as LATITUDES,
+    LATENCY_LONGITUDES  as LONGITUDES,
+    SIDE_KM,
+)
+import sweep_queries
 from sweep_queries import builders_for_shape, RADIUS_KM
 from sweep_metadata import write_metadata
 
@@ -86,34 +91,37 @@ def run_sql_in(db, sql):
 
 
 def preflight():
-    """Verify each engine's native DB has what its query needs."""
+    """Verify each engine's native DB has what its query needs.
+    Uses sweep_queries.SOURCE_TABLE so it checks the correct table after
+    any --table override (my_mapdata vs geo_cities)."""
+    tbl = sweep_queries.SOURCE_TABLE
     checks = {
-        'bench_dans': """
+        'bench_dans': f"""
             SELECT
               (SELECT count(*) FROM pg_proc WHERE proname='geohash_cells_for_bbox') AS dans_cells,
-              (SELECT count(*) FROM pg_class WHERE relname='my_mapdata_left_gh6_idx') AS gh6_idx,
-              (SELECT count(*) FROM my_mapdata) AS rows;
+              (SELECT count(*) FROM pg_class WHERE relname='{tbl}_left_gh6_idx') AS gh6_idx,
+              (SELECT count(*) FROM {tbl}) AS rows;
         """,
-        'bench_cgeo': """
+        'bench_cgeo': f"""
             SELECT
               (SELECT count(*) FROM pg_extension WHERE extname='c_geohash') AS cgh,
               (SELECT count(*) FROM pg_proc WHERE proname='cgeo_text_spatial_candidates') AS cgeo_cands,
-              (SELECT count(*) FROM my_mapdata) AS rows,
-              (SELECT count(*) FROM my_mapdata_cgeo_index) AS cgeo_idx;
+              (SELECT count(*) FROM {tbl}) AS rows,
+              (SELECT count(*) FROM {tbl}_cgeo_index) AS cgeo_idx;
         """,
-        'bench_qz': """
+        'bench_qz': f"""
             SELECT
               (SELECT count(*) FROM pg_extension WHERE extname='c_quadtree_z') AS qz_ext,
               (SELECT count(*) FROM pg_proc WHERE proname='qz_text_spatial_candidates') AS qz_cands,
-              (SELECT count(*) FROM my_mapdata) AS rows,
-              (SELECT count(*) FROM my_mapdata_qz_index) AS qz_idx;
+              (SELECT count(*) FROM {tbl}) AS rows,
+              (SELECT count(*) FROM {tbl}_qz_index) AS qz_idx;
         """,
-        'bench_s2': """
+        'bench_s2': f"""
             SELECT
               (SELECT count(*) FROM pg_extension WHERE extname='yb_geospatial_s2') AS s2_ext,
               (SELECT count(*) FROM pg_proc WHERE proname='spatial_candidates_v2') AS s2_cands,
-              (SELECT count(*) FROM my_mapdata) AS rows,
-              (SELECT count(*) FROM my_mapdata_s2_index) AS s2_idx;
+              (SELECT count(*) FROM {tbl}) AS rows,
+              (SELECT count(*) FROM {tbl}_s2_index) AS s2_idx;
         """,
     }
     # Only preflight DBs that one of the currently-selected engines uses
@@ -152,7 +160,11 @@ def build_script_for_db(db, query_builders):
     return "".join(lines)
 
 
-EXEC_RE  = re.compile(r"Execution Time:\s*([\d.]+)\s*ms")
+# Anchor to start-of-line: the EXPLAIN output has multiple lines
+# containing "Execution Time:" (e.g. "Storage Table Read Execution Time: …",
+# "Storage Read Execution Time: …"). Only the bottom-of-plan unanchored
+# "Execution Time:" is the total wall time we want.
+EXEC_RE  = re.compile(r"^Execution Time:\s*([\d.]+)\s*ms", re.MULTILINE)
 READS_RE = re.compile(r"^\s*Storage Read Requests:\s*(\d+)", re.MULTILINE)
 
 
@@ -213,15 +225,34 @@ def main():
               "(inscribed circle in the same SIDE_KM envelope) — GEOS-backed "
               "sphere distance. Same cell-cover pre-filter either way, only "
               "the per-row recheck cost differs."))
+    parser.add_argument(
+        '--table', choices=['my_mapdata', 'geo_cities'], default='my_mapdata',
+        help=("Which source table to query. 'my_mapdata' (default, 344K POIs "
+              "but ~all clustered in Denver/SLC) — recheck path mostly hits "
+              "zero rows. 'geo_cities' (~50K GeoNames cities, globally "
+              "distributed) — recheck actually runs. Load geo_cities first "
+              "via s2_vs_geohash_benchmark/setup/06_setup_geocities.sh. "
+              "Note: pure_sql isn't supported on geo_cities (no precomputed "
+              "geo_hash10 column) and will auto-skip."))
     args = parser.parse_args()
 
+    # Apply --table by overriding the module-level SOURCE_TABLE in
+    # sweep_queries so every builder generates SQL against the chosen table.
+    sweep_queries.SOURCE_TABLE = args.table
+
     # Both pure_sql and qz are excluded by default — only include if asked.
+    # pure_sql is additionally forced-off on geo_cities (no geo_hash10 col).
     skips = []
     if not args.with_pure_sql: skips.append('pure_sql')
     if not args.with_qz:       skips.append('qz')
+    if args.table == 'geo_cities' and 'pure_sql' not in skips:
+        skips.append('pure_sql')
+        print("[config] geo_cities has no geo_hash10 column; "
+              "auto-skipping pure_sql.", file=sys.stderr)
     SYSTEMS = [s for s in SYSTEMS if s not in skips]
     query_builders = builders_for_shape(args.shape)
-    print(f"[config] shape = {args.shape}; running engines = {SYSTEMS}"
+    print(f"[config] table = {args.table}; shape = {args.shape}; "
+          f"engines = {SYSTEMS}"
           + (f"   (skipped: {skips})" if skips else ""))
 
     preflight()
@@ -301,6 +332,15 @@ def main():
     # Lives next to the CSV so anyone reading the data later can answer
     # "what was the envelope size / engine config / shape" without digging
     # into the script source as it was at the time of the run.
+    # Get the actual row count of whatever table we measured against — could
+    # be 344688 (my_mapdata) or ~50000 (geo_cities) or something else.
+    # Pick any DB we touched; row counts will be identical across them.
+    sample_db = next(iter(sorted(dbs_in_use)))
+    rows_out, _ = run_sql_in(sample_db, f"SELECT count(*) FROM {args.table}")
+    try:
+        data_rows = int(rows_out.strip().splitlines()[-1])
+    except Exception:
+        data_rows = None
     write_metadata(
         run_dir=run_dir,
         script="latency_sweep.py",
@@ -316,6 +356,8 @@ def main():
         queries_total=total,
         csv_filename=os.path.basename(csv_path),
         raw_filename=os.path.basename(raw_path),
+        data_table=args.table,
+        data_rows=data_rows,
     )
 
     # Auto-plot: pipe the freshly-written CSV into plot_latency.py so the
