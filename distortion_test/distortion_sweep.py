@@ -1,17 +1,33 @@
 #!/usr/bin/env python3
 """
-Distortion sweep across latitude + longitude.
+Distortion sweep across latitude + longitude — cell count only.
 
-ALL systems use the adaptive top-down coverer (S2's algorithm: priority
-queue + 1-level look-ahead, with cells terminating either at max_level
-or when fully contained in the region). max_cells is set effectively
-unbounded -- the cap is on the LEAF LEVEL, not the cell count -- so the
-result is the exact minimal merged cover at the matched leaf level.
+Counts how many cells each engine's adaptive top-down coverer emits for
+a fixed-size envelope at varying latitudes. Pure-geometry measurement:
+no row scanning, no DocDB RPCs, no data needed. Just calls the engine's
+covering function and counts cells.
+
+Why this is separate from latency_sweep.py:
+  * latency_sweep.py measures DB-side latency + RPCs *with data loaded*.
+    Influenced by tablet layout, planner choices, recheck cost.
+  * distortion_sweep.py measures the *algorithm-intrinsic* cell count.
+    Property of the cover geometry alone.
+
+ALL engines use their adaptive top-down coverer (S2's classic algorithm:
+priority queue + 1-level look-ahead, cells terminate when fully contained
+in the bbox or at max_level). max_cells is effectively unbounded -- the
+cap is on the LEAF LEVEL, not the cell budget -- so the result is the
+exact minimal merged cover at the matched leaf level.
+
+DB routing (post-cleanup, c_geohash and yb_geospatial_s2 no longer
+coexist in one DB):
+  c_geohash_cover_geometry(...)  -> bench_cgeo (has c_geohash extension)
+  ST_S2Covering(...)             -> bench_s2   (has yb_geospatial_s2)
 
 Sweeps latitude (the structural axis -- distortion grows with cos(lat)^-1
 for lat/lon-plane systems) and longitude (4 anchors to avoid alignment
 luck). For each (lat, lon) the cell count is recorded; aggregation is
-done downstream by the plot script (median across the 4 lons per lat).
+done downstream by plot_distortion.py (median across the 4 lons per lat).
 
 Output:
   * markdown table to stdout (raw per (lat, lon) plus median summary)
@@ -29,14 +45,16 @@ YSQL = os.path.join(YB_BIN, "ysqlsh")
 HOST = "127.0.0.1"
 PORT = "5433"
 USER = "yugabyte"
-DB = "lat_bench"
+
+# Two DBs because the two extensions can't coexist (both register the
+# `geometry` type). Each call routes to whichever DB hosts its function.
+GH_DB = "bench_cgeo"   # has c_geohash extension + c_geohash_cover_geometry
+S2_DB = "bench_s2"     # has yb_geospatial_s2 + ST_S2Covering
 
 # Sweep dim 1: latitude. Distortion grows with cos(lat)^-1 for lat/lon-plane
-# systems (geohash). S2's cube projection sidesteps this. Every 5 deg
-# below 80 deg, then dense near the pole where distortion accelerates.
-# Stopping at 89 deg to keep per-query work bounded -- at lat=89.9 the
-# bbox in degrees would be ~130 deg wide, generating multi-million-cell
-# leaf covers that are slow without adding insight.
+# systems (geohash). S2's cube projection sidesteps this. Every 5 deg below
+# 80, then dense near the pole where distortion accelerates. Stopping at
+# 89 deg to keep per-query work bounded.
 LATITUDES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70,
              75, 80, 82, 84, 85, 86, 87, 88, 89]
 # Sweep dim 2: anchor longitude. 4 lons spaced 24 deg apart, none on
@@ -45,14 +63,14 @@ LONGITUDES = [7.0, 31.0, 55.0, 79.0]
 
 SIDE_KM = 25.0      # half-width = 25 km, so 50 km x 50 km box
 
-# Adaptive coverer level/precision ranges. Both systems subdivide from
+# Adaptive coverer level/precision ranges. Both engines subdivide from
 # the coarse min level down to the matched leaf level (~150 m cells):
 #   gh-7  cells: 0.001373 x 0.001373 deg = 152 m x 152 m  at the equator
 #   S2-L16 avg edge ~ 142 m globally
 GH_MIN_PREC,   GH_MAX_PREC   = 1, 7
 S2_MIN_LEVEL,  S2_MAX_LEVEL  = 4, 16
 
-# max_cells is effectively unbounded -- the LEAF LEVEL caps the cover,
+# max_cells is effectively unbounded — the LEAF LEVEL caps the cover,
 # not a cell-count budget. The adaptive coverer will subdivide every
 # non-fully-contained cell down to the leaf level.
 MAX_CELLS = 1_000_000
@@ -61,6 +79,8 @@ EARTH_R_KM = 6371.0088
 
 
 def rect_bbox_deg(lat, lon, side_km):
+    """Construct a (lon_min, lat_min, lon_max, lat_max) bbox spanning
+    `side_km` km on each side of (lat, lon) on the spheroid."""
     a = side_km / EARTH_R_KM
     phi = math.radians(lat)
     dlat = math.degrees(a)
@@ -72,32 +92,35 @@ def rect_bbox_deg(lat, lon, side_km):
     return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
 
 
-def run_one(sql):
+def run_one(db, sql):
+    """Run a single SQL in the named DB, return stripped scalar output."""
     args = [YSQL, "-h", HOST, "-p", PORT, "-U", USER,
-            "-v", "ON_ERROR_STOP=1", "-X", "-d", DB, "-t", "-A", "-c", sql]
+            "-v", "ON_ERROR_STOP=1", "-X", "-d", db, "-t", "-A", "-c", sql]
     out = subprocess.run(args, check=True, capture_output=True, text=True)
     return out.stdout.strip()
 
 
 def gh_cells(lat, lon):
-    """gh adaptive top-down: subdivides from gh-1 down to gh-7,
-    terminating cells fully contained in the bbox or at the leaf."""
+    """c_geohash adaptive top-down: subdivides from gh-1 down to gh-7,
+    terminating cells fully contained in the bbox or at the leaf.
+    Returns the number of (min10, max10) cell pairs."""
     mn_lon, mn_lat, mx_lon, mx_lat = rect_bbox_deg(lat, lon, SIDE_KM)
     sql = (f"SELECT COALESCE(array_length(c_geohash_cover_geometry("
            f"ST_MakeEnvelope({mn_lon}, {mn_lat}, {mx_lon}, {mx_lat}, 4326), "
            f"{GH_MIN_PREC}, {GH_MAX_PREC}, {MAX_CELLS}), 1), 0) / 2;")
-    out = run_one(sql)
+    out = run_one(GH_DB, sql)
     return int(out) if out else 0
 
 
 def s2_cells(lat, lon):
     """S2 adaptive top-down: subdivides from L4 down to L16, terminating
-    cells fully contained in the bbox or at the leaf."""
+    cells fully contained in the bbox or at the leaf. Returns the number
+    of S2 cell IDs emitted."""
     mn_lon, mn_lat, mx_lon, mx_lat = rect_bbox_deg(lat, lon, SIDE_KM)
     sql = (f"SELECT COALESCE(array_length(ST_S2Covering("
            f"ST_MakeEnvelope({mn_lon}, {mn_lat}, {mx_lon}, {mx_lat}, 4326), "
            f"{S2_MIN_LEVEL}, {S2_MAX_LEVEL}, {MAX_CELLS}), 1), 0);")
-    out = run_one(sql)
+    out = run_one(S2_DB, sql)
     return int(out) if out else 0
 
 
@@ -111,6 +134,8 @@ def main():
     print(f"# S2 range    : level {S2_MIN_LEVEL}..{S2_MAX_LEVEL} "
           f"(leaf S2-L{S2_MAX_LEVEL} = ~142 m cells globally)")
     print(f"# max_cells   : {MAX_CELLS}  (effectively unbounded)")
+    print(f"# gh DB       : {GH_DB}")
+    print(f"# s2 DB       : {S2_DB}")
     print()
 
     here = os.path.dirname(os.path.realpath(__file__))

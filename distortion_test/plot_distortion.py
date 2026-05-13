@@ -61,7 +61,7 @@ def plot_cells_vs_lat(agg, out_path):
     ax.plot(lats, s2, marker="s", color="#2166ac", linewidth=2.5,
             label="S2 (level 16, ~142 m cells)")
     ax.set_xlabel("Latitude (°)")
-    ax.set_ylabel("Number of cells generated")
+    ax.set_ylabel("Cells in cover")
     ax.set_title("Cells per query vs latitude\n"
                  "(median across 4 anchor longitudes; "
                  "50 km × 50 km box, fixed cell size in each system)")
