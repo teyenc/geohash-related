@@ -393,6 +393,17 @@ def main():
             print(f"{sys_name:<11}{lat:<5}{em:>13.1f}{sr:>11.0f}"
                   f"{ct:>11.0f}{len(d['exec_ms']):>5}")
 
+    # Auto-plot: pipe the freshly-written CSV into plot_latency.py so the
+    # 3-panel chart (ms / RPCs / ratio-vs-s2) lands in the same run folder.
+    # Failure is non-fatal — the CSV is already on disk.
+    here = os.path.dirname(os.path.realpath(__file__))
+    plot_script = os.path.join(here, "plot_latency.py")
+    print(f"\n[auto-plot] running plot_latency.py ...")
+    rc = subprocess.run([sys.executable, plot_script, csv_path]).returncode
+    if rc != 0:
+        print(f"  (plot failed with exit {rc}; CSV is still at {csv_path})",
+              file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

@@ -268,6 +268,17 @@ def main():
             cells += [f"{s2_m:.0f}", f"{s2_m/s2_baseline:.2f}x"]
         print("| " + " | ".join(f"{c:>8}" for c in cells) + " |")
 
+    # Auto-plot: pipe the freshly-written CSV into plot_cell_count.py so
+    # cells_vs_lat.png / growth_vs_lat.png / ratio_vs_lat.png land in the
+    # same run folder. Failure is non-fatal — the CSV is already on disk.
+    here = os.path.dirname(os.path.realpath(__file__))
+    plot_script = os.path.join(here, "plot_cell_count.py")
+    print(f"\n[auto-plot] running plot_cell_count.py ...")
+    rc = subprocess.run([sys.executable, plot_script, csv_path]).returncode
+    if rc != 0:
+        print(f"  (plot failed with exit {rc}; CSV is still at {csv_path})",
+              file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()
