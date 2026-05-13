@@ -84,6 +84,34 @@ SOURCE_TABLE = 'my_mapdata'
 PK_COLUMN    = 'md_pk'
 GH_COLUMN    = 'geo_hash10'
 
+# ---- query shape ----------------------------------------------------------
+#
+# Two recheck shapes supported (selected by the harness via QUERY_BUILDERS
+# vs CIRCLE_QUERY_BUILDERS — see latency_sweep.py's --shape flag):
+#
+#   box     : recheck via ST_X/ST_Y lat/lon BETWEEN. Cheap arithmetic, no
+#             GEOS calls. Same as the original distortion sweep.
+#   circle  : recheck via ST_DistanceSphere(geom, center) <= radius_m.
+#             GEOS-backed sphere distance, meters. Inscribed circle in the
+#             SIDE_KM × SIDE_KM envelope (so RADIUS_KM = SIDE_KM / 2).
+#
+# Both shapes share the SAME envelope for the cell-cover pre-filter — only
+# the recheck differs. That makes the comparison apples-to-apples on cover
+# cost (RPCs); any wall-time delta is the recheck-per-row cost (GEOS call
+# vs two BETWEEN tests).
+#
+# Why ST_DistanceSphere, not ST_DWithin: yb_geospatial_s2's planner hook
+# intercepts ST_DWithin and rewrites it to call spatial_candidates auto-
+# matically. We already pass spatial_candidates_v2 explicitly with our own
+# min/max levels and max_cells; we don't want a second hook-rewrite. A
+# raw distance function returning float8 isn't a predicate the hook can
+# pattern-match, so it stays out of the way.
+
+RADIUS_KM = 50     # circle radius in km; matches half of SIDE_KM (50)
+                   # so the circle is inscribed in the same envelope as
+                   # the box query — identical cell-cover work, only the
+                   # set of "kept" rows differs (the circle is smaller).
+
 # ---- per-engine cover parameters ------------------------------------------
 
 # pure_sql: fixed-precision LEFT(geo_hash10, N) bucket lookup.
@@ -229,3 +257,241 @@ QUERY_BUILDERS = {
     'qz':        query_qz,
     's2':        query_s2,
 }
+
+
+# ---------------------------------------------------------------------------
+# Circle-shape variants
+# ---------------------------------------------------------------------------
+# Same cell-cover pre-filter as the box queries above (the cell-candidates
+# helpers still take the SIDE_KM × SIDE_KM envelope as input — no point
+# making the cover function compute against a curved polygon).
+#
+# The recheck is what changes:
+#     ST_DistanceSphere(geom, center) <= RADIUS_KM * 1000
+# where `center` is the (lon, lat) point. This filters down to the
+# inscribed circle inside the envelope.
+
+def _center_point_sql(lat, lon):
+    """SQL fragment for the circle center point as a SRID=4326 geometry."""
+    return f"ST_SetSRID(ST_MakePoint({lon}, {lat}), 4326)"
+
+
+def query_circle_pure_sql(lat, lon):
+    """pure_sql circle variant. Recheck uses a planar approximation —
+    Dan's bench_dans doesn't have ST_DistanceSphere on Dan's custom
+    geometry type. cos(lat)-corrected meters^2 comparison, fine for
+    small (50 km-scale) envelopes."""
+    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
+    radius_m_sq = (RADIUS_KM * 1000.0) ** 2
+    cos_lat = max(math.cos(math.radians(lat)), 0.001)
+    # Distance² in meters², via planar approximation. Avoids dependence on
+    # PostGIS-style distance functions in bench_dans.
+    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+SELECT count(*) FROM {SOURCE_TABLE}
+ WHERE LEFT({GH_COLUMN}, {GH_PURE_PREC}) = ANY(
+         ARRAY(SELECT * FROM geohash_cells_for_bbox(
+                 {xmin}, {ymin}, {xmax}, {ymax}, {GH_PURE_PREC})))
+   AND (
+         ((ST_X(geom) - {lon}) * 111000.0 * {cos_lat}) * ((ST_X(geom) - {lon}) * 111000.0 * {cos_lat})
+       + ((ST_Y(geom) - {lat}) * 111000.0)            * ((ST_Y(geom) - {lat}) * 111000.0)
+       ) <= {radius_m_sq};
+"""
+
+
+def query_circle_c_geohash(lat, lon):
+    """c_geohash circle variant. Same cover pre-filter as the box query;
+    recheck is ST_DistanceSphere (GEOS-backed sphere distance, meters)."""
+    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
+    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
+    radius_m = RADIUS_KM * 1000
+    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+SELECT count(*) FROM {SOURCE_TABLE}
+ WHERE {PK_COLUMN} IN (
+         SELECT cgeo_text_spatial_candidates('{SOURCE_TABLE}', {env}, {GH_ADAPT_MAX}))
+   AND ST_DistanceSphere(geom, {_center_point_sql(lat, lon)}) <= {radius_m};
+"""
+
+
+def query_circle_qz(lat, lon):
+    """qz circle variant. Same shape as query_circle_c_geohash with the
+    qz_text_spatial_candidates helper instead."""
+    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
+    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
+    radius_m = RADIUS_KM * 1000
+    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+SELECT count(*) FROM {SOURCE_TABLE}
+ WHERE {PK_COLUMN} IN (
+         SELECT qz_text_spatial_candidates('{SOURCE_TABLE}', {env}, {QZ_ADAPT_MAX}))
+   AND ST_DistanceSphere(geom, {_center_point_sql(lat, lon)}) <= {radius_m};
+"""
+
+
+def query_circle_s2(lat, lon):
+    """s2 circle variant. Note we deliberately use ST_DistanceSphere, NOT
+    ST_DWithin — the yb_geospatial_s2 planner hook would rewrite ST_DWithin
+    to call spatial_candidates internally, conflicting with our explicit
+    spatial_candidates_v2 invocation. ST_DistanceSphere is a distance
+    function (returns float8), not a predicate the hook pattern-matches,
+    so it stays out of the way."""
+    xmin, ymin, xmax, ymax = envelope_coords(lat, lon)
+    env = envelope_st_makeenvelope(xmin, ymin, xmax, ymax)
+    radius_m = RADIUS_KM * 1000
+    return f"""EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+SELECT count(*) FROM {SOURCE_TABLE}
+ WHERE {PK_COLUMN} IN (
+         SELECT spatial_candidates_v2('{SOURCE_TABLE}', {env},
+                                      {S2_ADAPT_MIN}, {S2_ADAPT_MAX},
+                                      {S2_MAX_CELLS}))
+   AND ST_DistanceSphere(geom, {_center_point_sql(lat, lon)}) <= {radius_m};
+"""
+
+
+CIRCLE_QUERY_BUILDERS = {
+    'pure_sql':  query_circle_pure_sql,
+    'c_geohash': query_circle_c_geohash,
+    'qz':        query_circle_qz,
+    's2':        query_circle_s2,
+}
+
+
+def builders_for_shape(shape):
+    """Pick the right per-engine query-builder dict for the requested shape.
+    'box' (default) -> ST_X/ST_Y BETWEEN recheck.
+    'circle'        -> ST_DistanceSphere recheck (radius = RADIUS_KM)."""
+    if shape == 'box':
+        return QUERY_BUILDERS
+    if shape == 'circle':
+        return CIRCLE_QUERY_BUILDERS
+    raise ValueError(f"unknown shape {shape!r} (expected 'box' or 'circle')")
+
+
+# ============================================================================
+# Ready-to-run examples
+# ============================================================================
+# All 8 query variants below are the *exact* SQL the sweep sends, with
+# (lat=0, lon=7) substituted (a 50 km × 50 km envelope in the Gulf of
+# Guinea; off the African coast, no POIs there — useful because plans
+# stay simple and you can see the cell-cover cost in isolation).
+#
+# Pick a populated (lat, lon) like (31, 31) for "over Egypt" if you want
+# rows actually returned. The math: envelope half-width in degrees is
+#   half_lat = 25 / 111
+#   half_lon = 25 / (111 * cos(radians(lat)))
+# and the four envelope coords are (lon - half_lon, lat - half_lat,
+# lon + half_lon, lat + half_lat). Or just call the builder:
+#
+#   python3 -c "from sweep_queries import query_c_geohash; print(query_c_geohash(31, 31))"
+#
+# ----------------------------------------------------------------------------
+# How to open each DB
+# ----------------------------------------------------------------------------
+# YB benches (port 5433):
+#   YSQL=/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin/ysqlsh
+#   $YSQL -h 127.0.0.1 -p 5433 -U yugabyte -d bench_dans       # pure_sql
+#   $YSQL -h 127.0.0.1 -p 5433 -U yugabyte -d bench_cgeo       # c_geohash
+#   $YSQL -h 127.0.0.1 -p 5433 -U yugabyte -d bench_qz         # qz
+#   $YSQL -h 127.0.0.1 -p 5433 -U yugabyte -d bench_s2         # s2
+#
+# ----------------------------------------------------------------------------
+# pure_sql (bench_dans) — box
+# ----------------------------------------------------------------------------
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE LEFT(geo_hash10, 6) = ANY(
+#          ARRAY(SELECT * FROM geohash_cells_for_bbox(
+#                  6.774774774774775, -0.22522522522522523,
+#                  7.225225225225225,  0.22522522522522523, 6)))
+#    AND ST_X(geom) BETWEEN 6.774774774774775 AND 7.225225225225225
+#    AND ST_Y(geom) BETWEEN -0.22522522522522523 AND 0.22522522522522523;
+#
+# ----------------------------------------------------------------------------
+# pure_sql (bench_dans) — circle
+# ----------------------------------------------------------------------------
+# (Recheck is planar approximation — Dan's geometry type doesn't have
+#  ST_DistanceSphere. cos(lat)-corrected meters², 25 km radius squared.)
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE LEFT(geo_hash10, 6) = ANY(
+#          ARRAY(SELECT * FROM geohash_cells_for_bbox(
+#                  6.774774774774775, -0.22522522522522523,
+#                  7.225225225225225,  0.22522522522522523, 6)))
+#    AND (
+#          ((ST_X(geom) - 7.0) * 111000.0 * 1.0) * ((ST_X(geom) - 7.0) * 111000.0 * 1.0)
+#        + ((ST_Y(geom) - 0)   * 111000.0)       * ((ST_Y(geom) - 0)   * 111000.0)
+#        ) <= 625000000.0;     -- 25000² m²
+#
+# ----------------------------------------------------------------------------
+# c_geohash (bench_cgeo) — box
+# ----------------------------------------------------------------------------
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE md_pk IN (
+#          SELECT cgeo_text_spatial_candidates('my_mapdata',
+#            ST_MakeEnvelope(6.774774774774775, -0.22522522522522523,
+#                            7.225225225225225,  0.22522522522522523, 4326), 7))
+#    AND ST_X(geom) BETWEEN 6.774774774774775 AND 7.225225225225225
+#    AND ST_Y(geom) BETWEEN -0.22522522522522523 AND 0.22522522522522523;
+#
+# ----------------------------------------------------------------------------
+# c_geohash (bench_cgeo) — circle
+# ----------------------------------------------------------------------------
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE md_pk IN (
+#          SELECT cgeo_text_spatial_candidates('my_mapdata',
+#            ST_MakeEnvelope(6.774774774774775, -0.22522522522522523,
+#                            7.225225225225225,  0.22522522522522523, 4326), 7))
+#    AND ST_DistanceSphere(geom,
+#          ST_SetSRID(ST_MakePoint(7.0, 0), 4326)) <= 25000;
+#
+# ----------------------------------------------------------------------------
+# qz (bench_qz) — box
+# ----------------------------------------------------------------------------
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE md_pk IN (
+#          SELECT qz_text_spatial_candidates('my_mapdata',
+#            ST_MakeEnvelope(6.774774774774775, -0.22522522522522523,
+#                            7.225225225225225,  0.22522522522522523, 4326), 18))
+#    AND ST_X(geom) BETWEEN 6.774774774774775 AND 7.225225225225225
+#    AND ST_Y(geom) BETWEEN -0.22522522522522523 AND 0.22522522522522523;
+#
+# ----------------------------------------------------------------------------
+# qz (bench_qz) — circle
+# ----------------------------------------------------------------------------
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE md_pk IN (
+#          SELECT qz_text_spatial_candidates('my_mapdata',
+#            ST_MakeEnvelope(6.774774774774775, -0.22522522522522523,
+#                            7.225225225225225,  0.22522522522522523, 4326), 18))
+#    AND ST_DistanceSphere(geom,
+#          ST_SetSRID(ST_MakePoint(7.0, 0), 4326)) <= 25000;
+#
+# ----------------------------------------------------------------------------
+# s2 (bench_s2) — box
+# ----------------------------------------------------------------------------
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE md_pk IN (
+#          SELECT spatial_candidates_v2('my_mapdata',
+#            ST_MakeEnvelope(6.774774774774775, -0.22522522522522523,
+#                            7.225225225225225,  0.22522522522522523, 4326),
+#            10, 16, 1000000))
+#    AND ST_X(geom) BETWEEN 6.774774774774775 AND 7.225225225225225
+#    AND ST_Y(geom) BETWEEN -0.22522522522522523 AND 0.22522522522522523;
+#
+# ----------------------------------------------------------------------------
+# s2 (bench_s2) — circle
+# ----------------------------------------------------------------------------
+# (Note: ST_DistanceSphere, NOT ST_DWithin — the s2 planner hook would
+#  rewrite ST_DWithin and conflict with our explicit spatial_candidates_v2.)
+# EXPLAIN (ANALYZE, DIST, COSTS OFF, SUMMARY ON, FORMAT TEXT)
+# SELECT count(*) FROM my_mapdata
+#  WHERE md_pk IN (
+#          SELECT spatial_candidates_v2('my_mapdata',
+#            ST_MakeEnvelope(6.774774774774775, -0.22522522522522523,
+#                            7.225225225225225,  0.22522522522522523, 4326),
+#            10, 16, 1000000))
+#    AND ST_DistanceSphere(geom,
+#          ST_SetSRID(ST_MakePoint(7.0, 0), 4326)) <= 25000;

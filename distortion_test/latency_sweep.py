@@ -50,7 +50,7 @@ import sys
 import time
 
 from sweep_config import LATENCY_LATITUDES as LATITUDES, LONGITUDES
-from sweep_queries import QUERY_BUILDERS
+from sweep_queries import builders_for_shape, RADIUS_KM
 
 YSQL = "/net/dev-server-te-yenchou/share/code/yugabyte-db/build/latest/postgres/bin/ysqlsh"
 HOST = "127.0.0.1"
@@ -130,7 +130,7 @@ def preflight():
 # ---------------------------------------------------------------------------
 # Build per-DB scripts (all queries for systems mapped to that DB)
 # ---------------------------------------------------------------------------
-def build_script_for_db(db):
+def build_script_for_db(db, query_builders):
     sys_in_db = [s for s in SYSTEMS if SYSTEM_DB[s] == db]
     lines = [
         "\\pset format unaligned\n",
@@ -138,7 +138,7 @@ def build_script_for_db(db):
         "\\pset tuples_only off\n",
     ]
     for sys_name in sys_in_db:
-        builder = QUERY_BUILDERS[sys_name]
+        builder = query_builders[sys_name]
         for lat in LATITUDES:
             for lon in LONGITUDES:
                 for run_idx in range(-WARMUP_RUNS, MEASURED_RUNS):
@@ -204,6 +204,14 @@ def main():
               "main comparison is c_geohash vs s2; qz is the auxiliary "
               "Hilbert-vs-Z-order isolation experiment (4-ary tree + Z curve, "
               "matches s2's branching factor but uses gh's curve)."))
+    parser.add_argument(
+        '--shape', choices=['box', 'circle'], default='box',
+        help=("Query shape. 'box' (default) rechecks via ST_X/ST_Y lat/lon "
+              f"BETWEEN — pure arithmetic, no GEOS. 'circle' rechecks via "
+              f"ST_DistanceSphere(geom, center) <= {RADIUS_KM*1000} m "
+              "(inscribed circle in the same SIDE_KM envelope) — GEOS-backed "
+              "sphere distance. Same cell-cover pre-filter either way, only "
+              "the per-row recheck cost differs."))
     args = parser.parse_args()
 
     # Both pure_sql and qz are excluded by default — only include if asked.
@@ -211,7 +219,8 @@ def main():
     if not args.with_pure_sql: skips.append('pure_sql')
     if not args.with_qz:       skips.append('qz')
     SYSTEMS = [s for s in SYSTEMS if s not in skips]
-    print(f"[config] running engines = {SYSTEMS}"
+    query_builders = builders_for_shape(args.shape)
+    print(f"[config] shape = {args.shape}; running engines = {SYSTEMS}"
           + (f"   (skipped: {skips})" if skips else ""))
 
     preflight()
@@ -235,7 +244,7 @@ def main():
     all_rows = []
     raw_acc = ""
     for db in sorted(dbs_in_use):
-        script = build_script_for_db(db)
+        script = build_script_for_db(db, query_builders)
         sys_in_db = [s for s in SYSTEMS if SYSTEM_DB[s] == db]
         print(f"[{db}] running {len(sys_in_db)} system(s) "
               f"({n_per_db[db]} queries, {len(script)} bytes)...")
